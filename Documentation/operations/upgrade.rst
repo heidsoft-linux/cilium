@@ -338,6 +338,7 @@ Removed Options
 Helm Options
 ~~~~~~~~~~~~
 
+* ``bandwidthManager`` has been renamed into ``bandwidthManager.enabled``.
 * ``bpf.hostRouting`` has been deprecated in favor of ``bpf.hostLegacyRouting``, and
   will be removed in 1.13.
 * ``hubble.tls.ca.cert`` has been deprecated in favor of ``tls.ca.cert``, and
