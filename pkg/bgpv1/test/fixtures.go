@@ -12,10 +12,10 @@ import (
 	"github.com/cilium/hive/cell"
 	"github.com/cilium/hive/hivetest"
 	"github.com/cilium/statedb"
-	"github.com/stretchr/testify/require"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
 	k8sTesting "k8s.io/client-go/testing"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/ptr"
 
 	daemon_k8s "github.com/cilium/cilium/daemon/k8s"
@@ -37,8 +37,10 @@ import (
 	slim_meta_v1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/apis/meta/v1"
 	clientset_core_v1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/client/clientset/versioned/typed/core/v1"
 	"github.com/cilium/cilium/pkg/k8s/utils"
+	"github.com/cilium/cilium/pkg/loadbalancer"
 	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/option"
+	"github.com/cilium/cilium/pkg/svcrouteconfig"
 )
 
 // cilium BGP config
@@ -172,29 +174,12 @@ func newFixture(t testing.TB, ctx context.Context, conf fixtureConfig) (*fixture
 	f.fakeClientSet.CiliumFakeClientset.Tracker().Add(&conf.policy)
 	f.fakeClientSet.SlimFakeClientset.Tracker().Add(&conf.secret)
 
-	// Create route and device tables
-	routeTable, err := tables.NewRouteTable()
-	require.NoError(t, err)
-
-	deviceTable, err := tables.NewDeviceTable()
-	require.NoError(t, err)
-
-	// Create a cell that registers the tables with the StateDB
-	registerTablesCell := cell.Module(
-		"register-tables",
-		"Registers the route and device tables with the StateDB",
-		cell.Invoke(func(db *statedb.DB) {
-			err := db.RegisterTable(routeTable)
-			require.NoError(t, err)
-
-			err = db.RegisterTable(deviceTable)
-			require.NoError(t, err)
-		}),
-	)
-
 	// Construct a new Hive with mocked out dependency cells.
 	f.cells = []cell.Cell{
 		cell.Config(k8sPkg.DefaultConfig),
+		cell.Provide(func() loadbalancer.Config { return loadbalancer.DefaultConfig }),
+
+		cell.Provide(k8sPkg.DefaultServiceWatchConfig),
 
 		// service
 		cell.Provide(k8sPkg.ServiceResource),
@@ -205,12 +190,15 @@ func newFixture(t testing.TB, ctx context.Context, conf fixtureConfig) (*fixture
 		// CiliumLoadBalancerIPPool
 		cell.Provide(k8sPkg.LBIPPoolsResource),
 
+		// Routes config
+		cell.Config(svcrouteconfig.DefaultConfig),
+
 		// cilium node
-		cell.Provide(func(lc cell.Lifecycle, c k8sClient.Clientset) daemon_k8s.LocalCiliumNodeResource {
+		cell.Provide(func(lc cell.Lifecycle, c k8sClient.Clientset, mp workqueue.MetricsProvider) daemon_k8s.LocalCiliumNodeResource {
 			store := resource.New[*cilium_api_v2.CiliumNode](
 				lc, utils.ListerWatcherFromTyped[*cilium_api_v2.CiliumNodeList](
 					c.CiliumV2().CiliumNodes(),
-				),
+				), mp,
 			)
 			f.ciliumNode = store
 			return store
@@ -221,18 +209,16 @@ func newFixture(t testing.TB, ctx context.Context, conf fixtureConfig) (*fixture
 			return f.fakeClientSet
 		}),
 
-		// Register the tables with the StateDB
-		registerTablesCell,
+		// Provide statedb tables
+		cell.Provide(
+			tables.NewRouteTable,
+			tables.NewDeviceTable,
+			loadbalancer.NewFrontendsTable,
+			statedb.RWTable[*tables.Route].ToTable,          // Table[*Route]
+			statedb.RWTable[*tables.Device].ToTable,         // Table[*Device]
+			statedb.RWTable[*loadbalancer.Frontend].ToTable, // Table[*loadbalancer.Frontend]]
+		),
 
-		// Provide route table
-		cell.Provide(func() statedb.Table[*tables.Route] {
-			return routeTable.ToTable()
-		}),
-
-		// Provide device table
-		cell.Provide(func() statedb.Table[*tables.Device] {
-			return deviceTable.ToTable()
-		}),
 		// daemon config
 		cell.Provide(func() *option.DaemonConfig {
 			return &option.DaemonConfig{

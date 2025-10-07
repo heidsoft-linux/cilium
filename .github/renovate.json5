@@ -83,6 +83,7 @@
     "kind/enhancement",
     "release-note/misc"
   ],
+  "rebaseLabel": "dont-merge/needs-rebase",
   "stopUpdatingLabel": "renovate/stop-updating",
   "allowedPostUpgradeCommands": [
     "^make -C install/kubernetes$",
@@ -99,16 +100,21 @@
         "bufbuild/buf", // Protocol buffer toolkit
         "docker.io/alpine/socat", // Alpine socat package
         "docker.io/library/busybox", // Official busybox image
+        "eksctl-io/eksctl", // EKS CLI tool
         "go", // golang version directive upgrade in go.mod
         "google/cloud-sdk", // google cloud-sdk official package name
+        "google-github-actions/auth", // Google GitHub Actions auth
+        "google-github-actions/setup-gcloud", // Google GitHub Actions gcloud setup
         "grpc-ecosystem/grpc-health-probe", // Grpc ecosystem
         "kindest/node", // official kindest images
+        "kubernetes/kubernetes", // Kubernetes official releases
         "kubernetes-sigs/kind", // official kind dependencies
         "quay.io/cilium/cilium-envoy", // Cilium's Envoy proxy
         "quay.io/frrouting/frr", // FRRouting package
         "registry.k8s.io/coredns/coredns", // CoreDNS official image
         "renovatebot/github-action", // Renovate's GH action
         "renovatebot/renovate", // Renovate's bot name
+        "ghcr.io/renovatebot/renovate", // Renovate's container image
       ],
       "matchPackagePrefixes": [
         "actions/", // GitHub's official GH actions
@@ -255,7 +261,11 @@
         // https://github.com/google/go-licenses/issues/205
         "github.com/google/go-licenses",
         // We update this dependency manually together with conformance test changes
-        "sigs.k8s.io/gateway-api"
+        "sigs.k8s.io/gateway-api",
+        // Stop updating envoy control plane packages until they pushed the
+        // tag to stop go mod from erroring. See https://github.com/cilium/cilium/issues/41574
+        "github.com/envoyproxy/go-control-plane/contrib",
+        "github.com/envoyproxy/go-control-plane/envoy"
       ],
       "matchPackagePatterns": [
         // We can't update these libraries until github.com/shoenig/go-m1cpu
@@ -481,6 +491,16 @@
       "versioning": "regex:^((?<compatibility>[a-z0-9-.]+)|((?<major>\\d+)\\.(?<minor>\\d+)))\\-(?<patch>\\d+)\\.(?<build>\\d+)(@(?<currentDigest>sha256:[a-f0-9]+))?$"
     },
     {
+      // Disable updates for rhel8.6 for both complexity-test and kind
+      // since new versions are making the tests to fail.
+      "enabled": false,
+      "matchPackageNames": [
+        "quay.io/lvh-images/complexity-test",
+        "quay.io/lvh-images/kind"
+      ],
+      "matchCurrentVersion": "/^rhel8\\.6-.*$/"
+    },
+    {
       "groupName": "stable lvh-images",
       "groupSlug": "stable-lvh-images",
       "matchPackageNames": [
@@ -584,6 +604,21 @@
       }
     },
     {
+      "matchPackageNames": [
+        "github.com/cilium/charts"
+      ],
+      "postUpgradeTasks": {
+        "commands": [
+          "make -C Documentation update-cmdref"
+        ],
+        "fileFilters": [
+          "Documentation/cmdref/cilium_install.md",
+          "Documentation/cmdref/cilium_upgrade.md"
+        ],
+        "executionMode": "update"
+      }
+    },
+    {
       enabled: false,
       matchDepPatterns: [
         // k8s dependencies will be updated manually along with tests
@@ -633,6 +668,22 @@
         ],
         "executionMode": "update"
       }
+    },
+    {
+      // The images from the image-tools repository have a timestamp-based versioning scheme, see https://github.com/cilium/image-tools/pull/286
+      "matchPackageNames": [
+        "quay.io/cilium/cilium-bpftool",
+        "quay.io/cilium/ca-certificates",
+        "quay.io/cilium/cilium-checkpatch",
+        "quay.io/cilium/image-compilers",
+        "quay.io/cilium/iptables",
+        "quay.io/cilium/cilium-llvm",
+        "quay.io/cilium/image-maker",
+        "quay.io/cilium/network-perf",
+        "quay.io/cilium/startup-script",
+        "quay.io/cilium/image-tester",
+      ],
+      "versioning": "regex:^(?<major>\\d+)-[a-f0-9]{7}$",
     },
     {
       "matchDepNames": [
@@ -756,10 +807,8 @@
   "regexManagers": [
     {
       "fileMatch": [
-        "images/cilium/download-hubble\\.sh",
         "images/builder/install-protoc.sh",
         "images/builder/install-protoplugins.sh",
-        "images/hubble-relay/download-grpc-health-probe.sh",
         "images/runtime/build-gops.sh"
       ],
       // These regexes manage version and digest strings in shell scripts,

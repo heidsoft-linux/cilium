@@ -21,7 +21,6 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/goleak"
 
 	"github.com/cilium/cilium/daemon/cmd/cni"
 	daemonk8s "github.com/cilium/cilium/daemon/k8s"
@@ -34,11 +33,12 @@ import (
 	"github.com/cilium/cilium/pkg/datapath/tables"
 	"github.com/cilium/cilium/pkg/datapath/types"
 	"github.com/cilium/cilium/pkg/dial"
+	envoyCfg "github.com/cilium/cilium/pkg/envoy/config"
 	"github.com/cilium/cilium/pkg/hive"
 	"github.com/cilium/cilium/pkg/identity/cache"
 	"github.com/cilium/cilium/pkg/ipcache"
 	k8sClient "github.com/cilium/cilium/pkg/k8s/client/testutils"
-	"github.com/cilium/cilium/pkg/k8s/testutils"
+	k8sTestutils "github.com/cilium/cilium/pkg/k8s/testutils"
 	"github.com/cilium/cilium/pkg/k8s/version"
 	"github.com/cilium/cilium/pkg/kpr"
 	"github.com/cilium/cilium/pkg/kvstore"
@@ -54,24 +54,22 @@ import (
 	nodeTypes "github.com/cilium/cilium/pkg/node/types"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/source"
+	"github.com/cilium/cilium/pkg/testutils"
 	"github.com/cilium/cilium/pkg/time"
 )
 
 var debug = flag.Bool("debug", false, "Enable debug logging")
 
 func TestScript(t *testing.T) {
-	// Catch any leaked goroutines. Ignoring goroutines possibly left by other tests.
-	leakOpts := goleak.IgnoreCurrent()
 	t.Cleanup(func() {
-		goleak.VerifyNone(t,
+		// Catch any leaked goroutines. Ignoring goroutines possibly left by other tests.
+		leakOpts := testutils.GoleakIgnoreCurrent()
+		testutils.GoleakVerifyNone(t,
 			leakOpts,
-			// Ignore workqueue metrics collection goroutine, this would otherwise be
-			// cleaned up shortly after the tests complete.
-			goleak.IgnoreTopFunction("k8s.io/client-go/util/workqueue.(*Typed[...]).updateUnfinishedWorkLoop"),
 		)
 	})
 
-	version.Force(testutils.DefaultVersion)
+	version.Force(k8sTestutils.DefaultVersion)
 
 	var opts []hivetest.LogOption
 	if *debug {
@@ -95,11 +93,12 @@ func TestScript(t *testing.T) {
 		h := hive.New(
 			k8sClient.FakeClientCell(),
 			daemonk8s.ResourcesCell,
+			cell.Config(envoyCfg.SecretSyncConfig{}),
 			daemonk8s.TablesCell,
 			lbcell.Cell,
 
 			maglev.Cell,
-			node.LocalNodeStoreCell,
+			node.LocalNodeStoreTestCell,
 			cni.Cell,
 			ipset.Cell,
 			dial.ServiceResolverCell,
@@ -121,8 +120,7 @@ func TestScript(t *testing.T) {
 				},
 				func() kpr.KPRConfig {
 					return kpr.KPRConfig{
-						EnableNodePort:       true,
-						KubeProxyReplacement: option.KubeProxyReplacementTrue,
+						KubeProxyReplacement: true,
 					}
 				},
 				func() store.Factory {
@@ -142,7 +140,6 @@ func TestScript(t *testing.T) {
 					return nil
 				},
 			),
-			cell.Invoke(statedb.RegisterTable[tables.NodeAddress]),
 
 			cell.Provide(func(db *statedb.DB) (kvstore.Client, uhive.ScriptCmdsOut) {
 				client := kvstore.NewInMemoryClient(db, "__all__")

@@ -52,7 +52,6 @@ struct ipv6_frag_l4ports {
 	__be16 dport;
 } __packed;
 
-#ifdef ENABLE_IPV6_FRAGMENTS
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, struct ipv6_frag_id);
@@ -61,7 +60,6 @@ struct {
 	__uint(max_entries, CILIUM_IPV6_FRAG_MAP_MAX_ENTRIES);
 	__uint(map_flags, LRU_MEM_FLAVOR);
 } cilium_ipv6_frag_datagrams __section_maps_btf;
-#endif
 
 static __always_inline int ipv6_optlen(const struct ipv6_opt_hdr *opthdr)
 {
@@ -143,7 +141,7 @@ static __always_inline int ipv6_hdrlen_offset(struct __ctx_buff *ctx, int l3_off
 		}
 
 		if (nh == NEXTHDR_FRAGMENT) {
-			struct ipv6_frag_hdr frag;
+			struct ipv6_frag_hdr frag = { 0 };
 
 			if (ctx_load_bytes(ctx, l3_off + len, &frag, sizeof(frag)) < 0)
 				return DROP_INVALID;

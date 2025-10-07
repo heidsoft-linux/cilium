@@ -425,7 +425,7 @@ func Run(t Testing, dir string, a *analysis.Analyzer, patterns ...string) []*Res
 
 		// Construct the legacy result.
 		results = append(results, &Result{
-			Pass:        internal.Pass(act),
+			Pass:        internal.ActionPass(act), // may be nil
 			Diagnostics: act.Diagnostics,
 			Facts:       facts,
 			Result:      act.Result,
@@ -448,12 +448,12 @@ func Run(t Testing, dir string, a *analysis.Analyzer, patterns ...string) []*Res
 type Result struct {
 	Action *checker.Action
 
-	// legacy fields
+	// legacy fields (do not use)
 	Facts       map[types.Object][]analysis.Fact // nil key => package fact
-	Pass        *analysis.Pass
-	Diagnostics []analysis.Diagnostic // see Action.Diagnostics
-	Result      any                   // see Action.Result
-	Err         error                 // see Action.Err
+	Pass        *analysis.Pass                   // nil => action not executed
+	Diagnostics []analysis.Diagnostic            // see Action.Diagnostics
+	Result      any                              // see Action.Result
+	Err         error                            // see Action.Err
 }
 
 // loadPackages uses go/packages to load a specified packages (from source, with
@@ -575,7 +575,7 @@ func check(t Testing, gopath string, act *checker.Action) {
 	files := act.Package.OtherFiles
 
 	// Hack: these two analyzers need to extract expectations from
-	// all configurations, so include the files are are usually
+	// all configurations, so include the files are usually
 	// ignored. (This was previously a hack in the respective
 	// analyzers' tests.)
 	if act.Analyzer.Name == "buildtag" || act.Analyzer.Name == "directive" {

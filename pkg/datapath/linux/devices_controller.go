@@ -49,11 +49,6 @@ var DevicesControllerCell = cell.Module(
 		tables.NewRouteTable,
 		tables.NewNeighborTable,
 	),
-	cell.Invoke(
-		statedb.RegisterTable[*tables.Device],
-		statedb.RegisterTable[*tables.Route],
-		statedb.RegisterTable[*tables.Neighbor],
-	),
 
 	cell.Provide(
 		newDevicesController,
@@ -169,7 +164,13 @@ func (dc *devicesController) Start(startCtx cell.HookContext) error {
 }
 
 func (dc *devicesController) run(ctx context.Context) {
-	defer dc.params.NetlinkFuncs.Close()
+	closeHandle := func() {
+		err := dc.params.NetlinkFuncs.Close()
+		if err != nil {
+			dc.log.Warn("Netlink handle close error", logfields.Error, err)
+		}
+	}
+	defer closeHandle()
 
 	// Run the controller in a loop and restarting on failures until stopped.
 	// We're doing this as netlink is an unreliable protocol that may drop
@@ -474,14 +475,17 @@ func (dc *devicesController) processBatch(txn statedb.WriteTxn, batch map[int][]
 				r := tables.Route{
 					Table:     tables.RouteTable(u.Table),
 					LinkIndex: index,
-					Scope:     uint8(u.Scope),
+					Type:      tables.RouteType(u.Route.Type),
+					Scope:     tables.RouteScope(u.Scope),
 					Dst:       ipnetToPrefix(u.Family, u.Dst),
 					Priority:  u.Priority,
+					MTU:       u.MTU,
 				}
 				r.Src, _ = netip.AddrFromSlice(u.Src)
 				r.Gw, _ = netip.AddrFromSlice(u.Gw)
 
-				if u.Type == unix.RTM_NEWROUTE {
+				switch u.Type {
+				case unix.RTM_NEWROUTE:
 					_, _, err := dc.params.RouteTable.Insert(txn, &r)
 					if err != nil {
 						dc.log.Warn("Failed to insert route",
@@ -489,7 +493,7 @@ func (dc *devicesController) processBatch(txn statedb.WriteTxn, batch map[int][]
 							logfields.Route, r,
 						)
 					}
-				} else if u.Type == unix.RTM_DELROUTE {
+				case unix.RTM_DELROUTE:
 					_, _, err := dc.params.RouteTable.Delete(txn, &r)
 					if err != nil {
 						dc.log.Warn("Failed to delete route",
@@ -498,6 +502,7 @@ func (dc *devicesController) processBatch(txn statedb.WriteTxn, batch map[int][]
 						)
 					}
 				}
+
 			case netlink.NeighUpdate:
 				if dc.deadLinkIndexes.Has(u.LinkIndex) {
 					// Ignore neighbor updates for a device that has been removed
@@ -520,7 +525,8 @@ func (dc *devicesController) processBatch(txn statedb.WriteTxn, batch map[int][]
 				}
 				n.IPAddr, _ = netip.AddrFromSlice(u.IP)
 
-				if u.Type == unix.RTM_NEWNEIGH {
+				switch u.Type {
+				case unix.RTM_NEWNEIGH:
 					_, _, err := dc.params.NeighborTable.Insert(txn, &n)
 					if err != nil {
 						dc.log.Warn("Failed to insert neighbor",
@@ -528,7 +534,7 @@ func (dc *devicesController) processBatch(txn statedb.WriteTxn, batch map[int][]
 							logfields.Neighbor, n,
 						)
 					}
-				} else if u.Type == unix.RTM_DELNEIGH {
+				case unix.RTM_DELNEIGH:
 					_, _, err := dc.params.NeighborTable.Delete(txn, &n)
 					if err != nil {
 						dc.log.Warn("Failed to delete neighbor",
@@ -573,7 +579,6 @@ func (dc *devicesController) processBatch(txn statedb.WriteTxn, batch map[int][]
 			for r := range routes {
 				dc.params.RouteTable.Delete(txn, r)
 			}
-
 			// Remove all neighbors for the device. For a deleted device netlink does not
 			// always send complete set of neighbor delete messages.
 			neighbors := dc.params.NeighborTable.List(txn, tables.NeighborLinkIndex.Query(d.Index))
@@ -703,7 +708,7 @@ type netlinkFuncs struct {
 	AddrSubscribe     func(ch chan<- netlink.AddrUpdate, done <-chan struct{}, errorCallback func(error)) error
 	LinkSubscribe     func(ch chan<- netlink.LinkUpdate, done <-chan struct{}, errorCallback func(error)) error
 	NeighSubscribe    func(ch chan<- netlink.NeighUpdate, done <-chan struct{}, errorCallback func(error)) error
-	Close             func()
+	Close             func() error
 	LinkList          func() ([]netlink.Link, error)
 	AddrList          func(link netlink.Link, family int) ([]netlink.Addr, error)
 	RouteListFiltered func(family int, filter *netlink.Route, filterMask uint64) ([]netlink.Route, error)

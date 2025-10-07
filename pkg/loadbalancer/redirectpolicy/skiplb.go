@@ -154,7 +154,7 @@ func (dsl *desiredSkipLB) TableRow() []string {
 		dsl.LRPID.String(),
 		strings.Join(skipRedirects, ", "),
 		cookie,
-		string(dsl.Status.Kind),
+		dsl.Status.Kind.String(),
 		duration.HumanDuration(time.Since(dsl.Status.UpdatedAt)),
 	}
 }
@@ -186,15 +186,12 @@ var (
 )
 
 func newDesiredSkipLBTable(db *statedb.DB) (statedb.RWTable[*desiredSkipLB], error) {
-	tbl, err := statedb.NewTable(
+	return statedb.NewTable(
+		db,
 		"desired-skiplbmap",
 		desiredSkipLBPodIndex,
 		desiredSkipLBLRPIndex,
 	)
-	if err != nil {
-		return nil, err
-	}
-	return tbl, db.RegisterTable(tbl)
 }
 
 type skiplbOps struct {
@@ -388,9 +385,6 @@ func newSkipLBMap(p skiplbmapParams) (out bpf.MapOut[lbmaps.SkipLBMap], err erro
 
 	p.Lifecycle.Append(cell.Hook{
 		OnStart: func(cell.HookContext) error {
-			if !p.NetNSCookieSupport() {
-				return nil
-			}
 			return m.OpenOrCreate()
 		},
 		OnStop: func(cell.HookContext) error {

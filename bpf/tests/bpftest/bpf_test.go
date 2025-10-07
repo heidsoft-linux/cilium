@@ -64,6 +64,8 @@ func (w *testLogWriter) Write(p []byte) (n int, err error) {
 }
 
 func TestBPF(t *testing.T) {
+	ranTests := 0
+
 	if testPath == nil || *testPath == "" {
 		t.Skip("Set -bpf-test-path to run BPF tests")
 	}
@@ -113,6 +115,12 @@ func TestBPF(t *testing.T) {
 				}
 			}
 		})
+
+		ranTests++
+	}
+
+	if ranTests == 0 {
+		t.Fatal("no BPF programs found to test. Check --bpf-test-path and --test filter.")
 	}
 
 	if *testCoverageReport != "" {
@@ -186,18 +194,14 @@ func loadAndRunSpec(t *testing.T, entry fs.DirEntry, instrLog io.Writer) []*cove
 
 	testNameToPrograms := make(map[string]programSet)
 
-	checkProgExists := func(progName, testName, progType string) {
-		checkProgName := strings.Replace(progName, progType, "check", 1)
-		if spec, ok := spec.Programs[checkProgName]; ok {
-			match := checkProgRegex.FindStringSubmatch(spec.SectionName)
-			if match[1] != testName {
-				t.Fatalf(
-					"File '%s' contains a %s program for '%s' test, but no check program.",
-					elfPath,
-					progType,
-					testName,
-				)
-			}
+	checkProgUnique := func(prog *ebpf.Program, testName, progType string) {
+		if prog != nil {
+			t.Fatalf(
+				"File '%s' contains duplicate %s programs for the '%s' test.",
+				elfPath,
+				progType,
+				testName,
+			)
 		}
 	}
 
@@ -209,17 +213,28 @@ func loadAndRunSpec(t *testing.T, entry fs.DirEntry, instrLog io.Writer) []*cove
 
 		progs := testNameToPrograms[match[1]]
 		if match[2] == "pktgen" {
-			checkProgExists(progName, match[1], match[2])
+			checkProgUnique(progs.pktgenProg, match[1], match[2])
 			progs.pktgenProg = coll.Programs[progName]
 		}
 		if match[2] == "setup" {
-			checkProgExists(progName, match[1], match[2])
+			checkProgUnique(progs.setupProg, match[1], match[2])
 			progs.setupProg = coll.Programs[progName]
 		}
 		if match[2] == "check" {
+			checkProgUnique(progs.checkProg, match[1], match[2])
 			progs.checkProg = coll.Programs[progName]
 		}
 		testNameToPrograms[match[1]] = progs
+	}
+
+	for testName, progSet := range testNameToPrograms {
+		if progSet.checkProg == nil {
+			t.Fatalf(
+				"File '%s' does not contain a check program for the '%s' test.",
+				elfPath,
+				testName,
+			)
+		}
 	}
 
 	// Collect debug events and add them as logs of the main test
@@ -285,8 +300,7 @@ func loadAndRunSpec(t *testing.T, entry fs.DirEntry, instrLog io.Writer) []*cove
 }
 
 func loadAndPrepSpec(t *testing.T, elfPath string) *ebpf.CollectionSpec {
-	logger := hivetest.Logger(t)
-	spec, err := bpf.LoadCollectionSpec(logger, elfPath)
+	spec, err := ebpf.LoadCollectionSpec(elfPath)
 	if err != nil {
 		t.Fatalf("load spec %s: %v", elfPath, err)
 	}
@@ -301,7 +315,8 @@ func loadAndPrepSpec(t *testing.T, elfPath string) *ebpf.CollectionSpec {
 			continue
 		}
 
-		t.Logf("Skipping program '%s' of type '%s': BPF_PROG_RUN not supported", p.Name, p.Type)
+		t.Logf("Skipping program '%s' of type '%s': BPF_PROG_RUN not supported on program type",
+			p.Name, p.Type)
 		delete(spec.Programs, n)
 	}
 

@@ -57,12 +57,12 @@ func (fs *fakeSender) InterfaceByIndex(idx int) (Interface, error) {
 		return Interface{}, fmt.Errorf("Device does not exit: %d", idx)
 	}
 
-	return Interface{
-		iface: &net.Interface{
+	return InterfaceFromNetInterface(
+		&net.Interface{
 			Index: def.Index,
 			Name:  def.Name,
 		},
-	}, nil
+	), nil
 }
 
 var fakeDevices = map[int]*tables.Device{
@@ -130,9 +130,6 @@ func fixture(t *testing.T, c *Config) (
 		),
 
 		cell.Invoke(
-			// Register the devices table, required for it to work.
-			statedb.RegisterTable[*tables.Device],
-
 			func(dbParam *statedb.DB, devicesParam statedb.RWTable[*tables.Device], procParam *processor) {
 				db = dbParam
 				devices = devicesParam

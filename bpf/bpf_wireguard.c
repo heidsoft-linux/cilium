@@ -17,11 +17,19 @@
 #define SECLABEL_IPV4 WORLD_IPV4_ID
 #define SECLABEL_IPV6 WORLD_IPV6_ID
 
+/* Controls the inclusion of the CILIUM_CALL_HANDLE_ICMP6_NS section in the
+ * object file.
+ */
+#define SKIP_ICMPV6_NS_HANDLING
+
+/* Controls the inclusion of the CILIUM_CALL_SRV6 section in the object file.
+ */
+#define SKIP_SRV6_HANDLING
+
 #include "lib/tailcall.h"
 #include "lib/common.h"
 #include "lib/ipv6.h"
 #include "lib/ipv4.h"
-#include "lib/eth.h"
 #include "lib/dbg.h"
 #include "lib/trace.h"
 #include "lib/l3.h"
@@ -58,11 +66,20 @@ handle_ipv6(struct __ctx_buff *ctx, __u32 identity, __s8 *ext_err __maybe_unused
 	void *data_end, *data;
 	struct ipv6hdr *ip6;
 	struct endpoint_info *ep;
+	fraginfo_t __maybe_unused fraginfo;
 
 	/* See the equivalent v4 path for comments */
 
 	if (!revalidate_data_pull(ctx, &data, &data_end, &ip6))
 		return DROP_INVALID;
+
+#ifndef ENABLE_IPV6_FRAGMENTS
+	fraginfo = ipv6_get_fraginfo(ctx, ip6);
+	if (fraginfo < 0)
+		return (int)fraginfo;
+	if (ipfrag_is_fragment(fraginfo))
+		return DROP_FRAG_NOSUPPORT;
+#endif
 
 #ifdef ENABLE_NODEPORT
 	if (!ctx_skip_nodeport(ctx)) {
@@ -78,12 +95,12 @@ handle_ipv6(struct __ctx_buff *ctx, __u32 identity, __s8 *ext_err __maybe_unused
 	}
 #endif
 
-	if (!revalidate_data(ctx, &data, &data_end, &ip6))
-		return DROP_INVALID;
-
 #ifndef ENABLE_HOST_ROUTING
 	return TC_ACT_OK;
 #endif
+
+	if (!revalidate_data(ctx, &data, &data_end, &ip6))
+		return DROP_INVALID;
 
 	ep = lookup_ip6_endpoint(ip6);
 	if (ep && !(ep->flags & ENDPOINT_MASK_HOST_DELIVERY)) {
@@ -96,13 +113,8 @@ handle_ipv6(struct __ctx_buff *ctx, __u32 identity, __s8 *ext_err __maybe_unused
 		ret = maybe_add_l2_hdr(ctx, ep->ifindex, &l2_hdr_required);
 		if (ret != 0)
 			return ret;
-		if (l2_hdr_required) {
+		if (l2_hdr_required)
 			l3_off += __ETH_HLEN;
-			if (!____revalidate_data_pull(ctx, &data, &data_end,
-						      (void **)&ip6, sizeof(*ip6),
-							  false, l3_off))
-				return DROP_INVALID;
-		}
 #endif
 
 		return ipv6_local_delivery(ctx, l3_off, identity, MARK_MAGIC_IDENTITY, ep,
@@ -187,9 +199,6 @@ handle_ipv4(struct __ctx_buff *ctx, __u32 identity, __s8 *ext_err __maybe_unused
 	}
 #endif
 
-	if (!revalidate_data(ctx, &data, &data_end, &ip4))
-		return DROP_INVALID;
-
 #ifndef ENABLE_HOST_ROUTING
 	/* Without bpf_redirect_neigh() helper, we cannot redirect a
 	 * packet to a local endpoint in the direct routing mode, as
@@ -202,6 +211,9 @@ handle_ipv4(struct __ctx_buff *ctx, __u32 identity, __s8 *ext_err __maybe_unused
 	 */
 	return TC_ACT_OK;
 #endif
+
+	if (!revalidate_data(ctx, &data, &data_end, &ip4))
+		return DROP_INVALID;
 
 	/* Lookup IPv4 address in list of local endpoints and host IPs */
 	ep = lookup_ip4_endpoint(ip4);
@@ -260,15 +272,12 @@ int cil_from_wireguard(struct __ctx_buff *ctx)
 	int __maybe_unused ret;
 	__u32 __maybe_unused identity = UNKNOWN_ID;
 	__s8 __maybe_unused ext_err = 0;
-	__u16 proto = 0;
+	__u16 proto = ctx_get_protocol(ctx);
 
 	ctx_skip_nodeport_clear(ctx);
 
-	/* Pass unknown traffic to the stack */
-	if (!validate_ethertype(ctx, &proto))
-		return TC_ACT_OK;
-
 	bpf_clear_meta(ctx);
+	check_and_store_ip_trace_id(ctx);
 
 	switch (proto) {
 #ifdef ENABLE_IPV6
@@ -340,6 +349,7 @@ int cil_to_wireguard(struct __ctx_buff *ctx)
 		src_sec_identity = get_identity(ctx);
 
 	bpf_clear_meta(ctx);
+	check_and_store_ip_trace_id(ctx);
 
 #ifdef ENABLE_NODEPORT
 	if (magic == MARK_MAGIC_OVERLAY)

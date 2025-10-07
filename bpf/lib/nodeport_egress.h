@@ -209,7 +209,7 @@ skip_fib:
 		trace->monitor = monitor;
 
 		ret = __lb6_rev_nat(ctx, l4_off, &tuple, nat_info,
-				    ipfrag_has_l4_header(fraginfo), CT_EGRESS);
+				    ipfrag_has_l4_header(fraginfo), CT_EGRESS, false);
 		if (IS_ERR(ret))
 			return ret;
 
@@ -357,23 +357,8 @@ static __always_inline int nodeport_snat_fwd_ipv4(struct __ctx_buff *ctx,
 				return ret;
 
 			if (ret != DROP_CT_UNKNOWN_PROTO &&
-			    ct_is_reply4(get_ct_map4(&tuple), &tuple)) {
-				/* Look up the parent interface's MAC address and set it as the
-				 * source MAC address of the packet. We will assume the destination
-				 * MAC address is still correct. This assumption only holds if the
-				 * current and parent interfaces are on the same L2 network such as
-				 * in EKS.
-				 */
-				union macaddr smac = NATIVE_DEV_MAC_BY_IFINDEX(ep->parent_ifindex);
-
-				if (eth_store_saddr_aligned(ctx, smac.addr, 0) < 0)
-					return DROP_WRITE_ERROR;
-
-				/* For EKS we don't have to rewrite the dmac. Once we require a 5.10
-				 * kernel, this can turn into bpf_redirect_neigh() for robustness.
-				 */
-				return ctx_redirect(ctx, ep->parent_ifindex, 0);
-			}
+			    ct_is_reply4(get_ct_map4(&tuple), &tuple))
+				return redirect_neigh(ep->parent_ifindex, NULL, 0, 0);
 		}
 	}
 
@@ -604,50 +589,6 @@ int tail_handle_nat_fwd_ipv4(struct __ctx_buff *ctx)
 
 #ifdef ENABLE_HEALTH_CHECK
 static __always_inline int
-health_encap_v4(struct __ctx_buff *ctx, __u32 tunnel_ep,
-		__u32 seclabel)
-{
-	__u32 key_size = TUNNEL_KEY_WITHOUT_SRC_IP;
-	struct bpf_tunnel_key key;
-
-	/* When encapsulating, a packet originating from the local
-	 * host is being considered as a packet from a remote node
-	 * as it is being received.
-	 */
-	memset(&key, 0, sizeof(key));
-	key.tunnel_id = get_tunnel_id(seclabel == HOST_ID ? LOCAL_NODE_ID : seclabel);
-	key.remote_ipv4 = bpf_htonl(tunnel_ep);
-	key.tunnel_ttl = IPDEFTTL;
-
-	if (unlikely(ctx_set_tunnel_key(ctx, &key, key_size,
-					BPF_F_ZERO_CSUM_TX) < 0))
-		return DROP_WRITE_ERROR;
-	return 0;
-}
-
-static __always_inline int
-health_encap_v6(struct __ctx_buff *ctx, const union v6addr *tunnel_ep,
-		__u32 seclabel)
-{
-	__u32 key_size = TUNNEL_KEY_WITHOUT_SRC_IP;
-	struct bpf_tunnel_key key;
-
-	memset(&key, 0, sizeof(key));
-	key.tunnel_id = get_tunnel_id(seclabel == HOST_ID ? LOCAL_NODE_ID : seclabel);
-	key.remote_ipv6[0] = tunnel_ep->p1;
-	key.remote_ipv6[1] = tunnel_ep->p2;
-	key.remote_ipv6[2] = tunnel_ep->p3;
-	key.remote_ipv6[3] = tunnel_ep->p4;
-	key.tunnel_ttl = IPDEFTTL;
-
-	if (unlikely(ctx_set_tunnel_key(ctx, &key, key_size,
-					BPF_F_ZERO_CSUM_TX |
-					BPF_F_TUNINFO_IPV6) < 0))
-		return DROP_WRITE_ERROR;
-	return 0;
-}
-
-static __always_inline int
 lb_handle_health(struct __ctx_buff *ctx __maybe_unused, __be16 proto)
 {
 	void *data __maybe_unused, *data_end __maybe_unused;
@@ -676,7 +617,7 @@ lb_handle_health(struct __ctx_buff *ctx __maybe_unused, __be16 proto)
 				return DROP_WRITE_ERROR;
 			flags = BPF_F_INGRESS;
 		} else {
-			ret = health_encap_v4(ctx, val->peer.address, 0);
+			ret = dsr_set_ipip4_dev(ctx, val->peer.address, 0);
 			if (ret != 0)
 				return ret;
 			ctx->mark |= MARK_MAGIC_HEALTH_IPIP_DONE;
@@ -702,7 +643,7 @@ lb_handle_health(struct __ctx_buff *ctx __maybe_unused, __be16 proto)
 				return DROP_WRITE_ERROR;
 			flags = BPF_F_INGRESS;
 		} else {
-			ret = health_encap_v6(ctx, &val->peer.address, 0);
+			ret = dsr_set_ipip6_dev(ctx, &val->peer.address, 0);
 			if (ret != 0)
 				return ret;
 			ctx->mark |= MARK_MAGIC_HEALTH_IPIP_DONE;
@@ -741,28 +682,26 @@ handle_nat_fwd(struct __ctx_buff *ctx, __u32 cluster_id, __u32 src_id,
 	switch (proto) {
 #ifdef ENABLE_IPV4
 	case bpf_htons(ETH_P_IP):
-		ret = invoke_traced_tailcall_if(__or4(__and(is_defined(ENABLE_IPV4),
-							    is_defined(ENABLE_IPV6)),
-						      __and(is_defined(ENABLE_HOST_FIREWALL),
-							    is_defined(IS_BPF_HOST)),
-						      __and(is_defined(ENABLE_CLUSTER_AWARE_ADDRESSING),
-							    is_defined(ENABLE_INTER_CLUSTER_SNAT)),
-						      __and(is_defined(ENABLE_EGRESS_GATEWAY_COMMON),
-							    is_defined(IS_BPF_HOST))),
-						CILIUM_CALL_IPV4_NODEPORT_NAT_FWD,
-						handle_nat_fwd_ipv4, trace, ext_err);
+		if ((is_defined(ENABLE_IPV4) && is_defined(ENABLE_IPV6)) ||
+		    (is_defined(ENABLE_HOST_FIREWALL) && is_defined(IS_BPF_HOST)) ||
+		    (is_defined(ENABLE_CLUSTER_AWARE_ADDRESSING) &&
+		     is_defined(ENABLE_INTER_CLUSTER_SNAT)) ||
+		    (is_defined(ENABLE_EGRESS_GATEWAY_COMMON) && is_defined(IS_BPF_HOST)))
+			ret = tail_call_internal(ctx, CILIUM_CALL_IPV4_NODEPORT_NAT_FWD,
+						 ext_err);
+		else
+			ret = handle_nat_fwd_ipv4(ctx, trace, ext_err);
 		break;
 #endif /* ENABLE_IPV4 */
 #ifdef ENABLE_IPV6
 	case bpf_htons(ETH_P_IPV6):
-		ret = invoke_traced_tailcall_if(__or3(__and(is_defined(ENABLE_IPV4),
-							    is_defined(ENABLE_IPV6)),
-						      __and(is_defined(ENABLE_HOST_FIREWALL),
-							    is_defined(IS_BPF_HOST)),
-						      __and(is_defined(ENABLE_EGRESS_GATEWAY_COMMON),
-							    is_defined(IS_BPF_HOST))),
-						CILIUM_CALL_IPV6_NODEPORT_NAT_FWD,
-						handle_nat_fwd_ipv6, trace, ext_err);
+		if ((is_defined(ENABLE_IPV4) && is_defined(ENABLE_IPV6)) ||
+		    (is_defined(ENABLE_HOST_FIREWALL) && is_defined(IS_BPF_HOST)) ||
+		    (is_defined(ENABLE_EGRESS_GATEWAY_COMMON) && is_defined(IS_BPF_HOST)))
+			ret = tail_call_internal(ctx, CILIUM_CALL_IPV6_NODEPORT_NAT_FWD,
+						 ext_err);
+		else
+			ret = handle_nat_fwd_ipv6(ctx, trace, ext_err);
 		break;
 #endif /* ENABLE_IPV6 */
 	default:

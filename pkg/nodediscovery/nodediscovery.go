@@ -107,11 +107,12 @@ func (n *NodeDiscovery) StartDiscovery(ctx context.Context) {
 	// Start observing local node changes, so that we keep the corresponding CiliumNode
 	// and kvstore representations in sync. The first update is performed synchronously
 	// so that they are guaranteed to exist when StartDiscovery returns.
-	updates := stream.ToChannel(ctx,
-		// Coalescence events that are emitted almost at the same time, to prevent
-		// consecutive updates from triggering multiple CiliumNode/kvstore updates.
-		stream.Debounce(n.localNodeStore, 250*time.Millisecond))
-	localNode := <-updates
+	updates := stream.ToChannel(ctx, n.localNodeStore)
+	localNode, found := <-updates
+	if !found {
+		n.logger.Error("Aborting node discovery as  no local node received")
+		return
+	}
 
 	go func() {
 		n.logger.Info(
@@ -181,7 +182,7 @@ func (n *NodeDiscovery) updateLocalNode(ctx context.Context, ln *node.LocalNode)
 					}
 
 					err := n.Registrar.UpdateLocalKeySync(ctx, &ln.Node)
-					if err != nil {
+					if err != nil && !errors.Is(err, context.Canceled) {
 						n.logger.Error("Unable to propagate local node change to kvstore", logfields.Error, err)
 					}
 					return err
@@ -296,7 +297,7 @@ func (n *NodeDiscovery) mutateNodeResource(ctx context.Context, nodeResource *ci
 		APIVersion: "v1",
 		Kind:       "Node",
 		Name:       ln.Name,
-		UID:        ln.UID,
+		UID:        ln.Local.UID,
 	}}
 
 	nodeResource.ObjectMeta.Labels = ln.Labels
@@ -380,12 +381,16 @@ func (n *NodeDiscovery) mutateNodeResource(ctx context.Context, nodeResource *ci
 	case ipamOption.IPAMENI:
 		// set ENI field in the node only when the ENI ipam is specified
 		nodeResource.Spec.ENI = eniTypes.ENISpec{}
-		instanceID, instanceType, availabilityZone, vpcID, subnetID, err := metadata.GetInstanceMetadata()
+		imds, err := metadata.NewClient()
+		if err != nil {
+			logging.Fatal(n.logger, "Unable to create metadata client", logfields.Error, err)
+		}
+		info, err := imds.GetInstanceMetadata()
 		if err != nil {
 			logging.Fatal(n.logger, "Unable to retrieve InstanceID of own EC2 instance", logfields.Error, err)
 		}
 
-		if instanceID == "" {
+		if info.InstanceID == "" {
 			return errors.New("InstanceID of own EC2 instance is empty")
 		}
 
@@ -396,7 +401,7 @@ func (n *NodeDiscovery) mutateNodeResource(ctx context.Context, nodeResource *ci
 		// the PreAllocate value, so to ensure that the agent and the Operator
 		// are not conflicting with each other, we must have similar logic to
 		// determine the appropriate value to place inside the resource.
-		nodeResource.Spec.ENI.VpcID = vpcID
+		nodeResource.Spec.ENI.VpcID = info.VPCID
 		nodeResource.Spec.ENI.FirstInterfaceIndex = aws.Int(defaults.ENIFirstInterfaceIndex)
 		nodeResource.Spec.ENI.UsePrimaryAddress = aws.Bool(defaults.UseENIPrimaryAddress)
 		nodeResource.Spec.ENI.DisablePrefixDelegation = aws.Bool(defaults.ENIDisableNodeLevelPD)
@@ -453,16 +458,16 @@ func (n *NodeDiscovery) mutateNodeResource(ctx context.Context, nodeResource *ci
 			nodeResource.Spec.ENI.DeleteOnTermination = c.ENI.DeleteOnTermination
 		}
 
-		nodeResource.Spec.InstanceID = instanceID
-		nodeResource.Spec.ENI.InstanceType = instanceType
-		nodeResource.Spec.ENI.AvailabilityZone = availabilityZone
-		nodeResource.Spec.ENI.NodeSubnetID = subnetID
+		nodeResource.Spec.InstanceID = info.InstanceID
+		nodeResource.Spec.ENI.InstanceType = info.InstanceType
+		nodeResource.Spec.ENI.AvailabilityZone = info.AvailabilityZone
+		nodeResource.Spec.ENI.NodeSubnetID = info.SubnetID
 
 	case ipamOption.IPAMAzure:
-		if ln.ProviderID == "" {
+		if ln.Local.ProviderID == "" {
 			logging.Fatal(n.logger, "Spec.ProviderID in k8s node resource must be set for Azure IPAM")
 		}
-		if !strings.HasPrefix(ln.ProviderID, azureTypes.ProviderPrefix) {
+		if !strings.HasPrefix(ln.Local.ProviderID, azureTypes.ProviderPrefix) {
 			logging.Fatal(n.logger, fmt.Sprintf("Spec.ProviderID in k8s node resource must have prefix %s", azureTypes.ProviderPrefix))
 		}
 		// The Azure controller in Kubernetes creates a mix of upper
@@ -470,7 +475,7 @@ func (n *NodeDiscovery) mutateNodeResource(ctx context.Context, nodeResource *ci
 		// therefore not providing the exact representation of what is
 		// returned by the Azure API. Convert it to lower case for
 		// consistent results.
-		nodeResource.Spec.InstanceID = strings.ToLower(strings.TrimPrefix(ln.ProviderID, azureTypes.ProviderPrefix))
+		nodeResource.Spec.InstanceID = strings.ToLower(strings.TrimPrefix(ln.Local.ProviderID, azureTypes.ProviderPrefix))
 
 		if c := n.cniConfigManager.GetCustomNetConf(); c != nil {
 			if c.IPAM.MinAllocate != 0 {

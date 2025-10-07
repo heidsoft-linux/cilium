@@ -20,7 +20,7 @@ db/show services -f json -o services-actual.json
 cmp services-actual.json services-expected.json
 db/show frontends -f json -o frontends-actual.json
 sed '"updated-at":.*' '"updated-at": <redacted>,' frontends-actual.json
-sed '"id":.*' '"id": <redacted>' frontends-actual.json
+sed '"id":.*' '"id": <redacted>,' frontends-actual.json
 cmp frontends-actual.json frontends-expected.json
 db/show backends -f json -o backends-actual.json
 cmp backends-actual.json backends-expected.json
@@ -82,11 +82,27 @@ Address              Instances
   "PortName": "http",
   "ServicePort": 80,
   "Status": {
-    "kind": "Done",
     "updated-at": <redacted>,
-    "id": <redacted>
+    "id": <redacted>,
+    "kind": "Done"
   },
   "Backends": [
+    {
+      "Address": "10.244.1.1:8080/TCP",
+      "PortNames": [
+        "http"
+      ],
+      "Weight": 100,
+      "NodeName": "nodeport-worker",
+      "Zone": null,
+      "ClusterID": 0,
+      "Source": "k8s",
+      "State": 0,
+      "Unhealthy": false,
+      "UnhealthyUpdatedAt": null
+    }
+  ],
+  "HealthCheckBackends": [
     {
       "Address": "10.244.1.1:8080/TCP",
       "PortNames": [
@@ -112,11 +128,27 @@ Address              Instances
   "PortName": "http",
   "ServicePort": 80,
   "Status": {
-    "kind": "Done",
     "updated-at": <redacted>,
-    "id": <redacted>
+    "id": <redacted>,
+    "kind": "Done"
   },
   "Backends": [
+    {
+      "Address": "[2002::2]:8080/TCP",
+      "PortNames": [
+        "http"
+      ],
+      "Weight": 100,
+      "NodeName": "nodeport-worker",
+      "Zone": null,
+      "ClusterID": 0,
+      "Source": "k8s",
+      "State": 0,
+      "Unhealthy": false,
+      "UnhealthyUpdatedAt": null
+    }
+  ],
+  "HealthCheckBackends": [
     {
       "Address": "[2002::2]:8080/TCP",
       "PortNames": [
@@ -215,10 +247,22 @@ frontendparams:
     portname: http
     serviceport: 80
 status:
-    kind: Done
     updated-at: <redacted>
     id: <redacted>
+    kind: Done
 backends:
+    - address: 10.244.1.1:8080/TCP
+      portnames:
+        - http
+      weight: 100
+      nodename: nodeport-worker
+      zone: null
+      clusterid: 0
+      source: k8s
+      state: 0
+      unhealthy: false
+      unhealthyupdatedat: null
+healthcheckbackends:
     - address: 10.244.1.1:8080/TCP
       portnames:
         - http
@@ -240,10 +284,22 @@ frontendparams:
     portname: http
     serviceport: 80
 status:
-    kind: Done
     updated-at: <redacted>
     id: <redacted>
+    kind: Done
 backends:
+    - address: '[2002::2]:8080/TCP'
+      portnames:
+        - http
+      weight: 100
+      nodename: nodeport-worker
+      zone: null
+      clusterid: 0
+      source: k8s
+      state: 0
+      unhealthy: false
+      unhealthyupdatedat: null
+healthcheckbackends:
     - address: '[2002::2]:8080/TCP'
       portnames:
         - http

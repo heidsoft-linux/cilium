@@ -26,7 +26,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	daemonk8s "github.com/cilium/cilium/daemon/k8s"
+	cmtypes "github.com/cilium/cilium/pkg/clustermesh/types"
 	"github.com/cilium/cilium/pkg/datapath/tables"
+	envoyCfg "github.com/cilium/cilium/pkg/envoy/config"
 	"github.com/cilium/cilium/pkg/hive"
 	k8sClient "github.com/cilium/cilium/pkg/k8s/client/testutils"
 	k8sTestutils "github.com/cilium/cilium/pkg/k8s/testutils"
@@ -67,7 +69,6 @@ func TestScript(t *testing.T) {
 	scripttest.Test(t,
 		ctx,
 		func(t testing.TB, args []string) *script.Engine {
-
 			var opts []hivetest.LogOption
 			if *debug {
 				opts = append(opts, hivetest.LogLevel(slog.LevelDebug))
@@ -79,6 +80,7 @@ func TestScript(t *testing.T) {
 				k8sClient.FakeClientCell(),
 				daemonk8s.ResourcesCell,
 				daemonk8s.TablesCell,
+				cell.Config(envoyCfg.SecretSyncConfig{}),
 
 				cell.Config(loadbalancer.TestConfig{
 					// By default 10% of the time the LBMap operations fail
@@ -86,33 +88,28 @@ func TestScript(t *testing.T) {
 				}),
 				metrics.Cell,
 				maglev.Cell,
-				node.LocalNodeStoreCell,
+				node.LocalNodeStoreTestCell,
 				cell.Provide(
+					func() cmtypes.ClusterInfo { return cmtypes.ClusterInfo{} },
 					func(cfg loadbalancer.TestConfig) *loadbalancer.TestConfig { return &cfg },
 					tables.NewNodeAddressTable,
 					statedb.RWTable[tables.NodeAddress].ToTable,
 					source.NewSources,
 					func(cfg loadbalancer.TestConfig) *option.DaemonConfig {
 						return &option.DaemonConfig{
-							EnableIPv4:                  true,
-							EnableIPv6:                  true,
-							EnableInternalTrafficPolicy: true,
+							EnableIPv4: true,
+							EnableIPv6: true,
 						}
 					},
 					func() kpr.KPRConfig {
 						return kpr.KPRConfig{
-							KubeProxyReplacement:      option.KubeProxyReplacementTrue,
-							EnableNodePort:            true,
-							EnableHostPort:            true,
-							EnableSessionAffinity:     true,
-							EnableSVCSourceRangeCheck: true,
+							KubeProxyReplacement: true,
 						}
 					},
 					func(ops *lbreconciler.BPFOps, lns *node.LocalNodeStore, w *writer.Writer, waitFn loadbalancer.InitWaitFunc) uhive.ScriptCmdsOut {
 						return uhive.NewScriptCmds(testCommands{w, lns, ops, waitFn}.cmds())
 					},
 				),
-				cell.Invoke(statedb.RegisterTable[tables.NodeAddress]),
 
 				lbcell.Cell,
 			)
@@ -167,12 +164,13 @@ type testCommands struct {
 
 func (tc testCommands) cmds() map[string]script.Cmd {
 	return map[string]script.Cmd{
-		"test/update-backend-health": tc.updateHealth(),
-		"test/bpfops-reset":          tc.opsReset(),
-		"test/bpfops-summary":        tc.opsSummary(),
-		"test/set-node-labels":       tc.setNodeLabels(),
-		"test/set-node-ip":           tc.setNodeIP(),
-		"test/init-wait":             tc.initWait(),
+		"test/update-backend-health":        tc.updateHealth(),
+		"test/bpfops-reset":                 tc.opsReset(),
+		"test/bpfops-summary":               tc.opsSummary(),
+		"test/set-node-labels":              tc.setNodeLabels(),
+		"test/set-node-ip":                  tc.setNodeIP(),
+		"test/set-is-service-healthchecked": tc.setIsServiceHealthChecked(),
+		"test/init-wait":                    tc.initWait(),
 	}
 }
 
@@ -268,11 +266,25 @@ func (tc testCommands) setNodeIP() script.Cmd {
 		})
 }
 
+func (tc testCommands) setIsServiceHealthChecked() script.Cmd {
+	return script.Command(
+		script.CmdUsage{Summary: "Set isIServiceHealthChecked that reports services as being healthchecked based on the presence of the given annotation", Args: "annotation"},
+		func(s *script.State, args ...string) (script.WaitFunc, error) {
+			if len(args) != 1 {
+				return nil, fmt.Errorf("%w: expected 'annotation'", script.ErrUsage)
+			}
+
+			tc.w.SetIsServiceHealthCheckedFunc(func(svc *loadbalancer.Service) bool {
+				return svc.Annotations != nil && svc.Annotations[args[0]] != ""
+			})
+			return nil, nil
+		})
+}
+
 func (tc testCommands) initWait() script.Cmd {
 	return script.Command(
 		script.CmdUsage{Summary: "Wait for InitWaitFunc() to return"},
 		func(s *script.State, args ...string) (script.WaitFunc, error) {
 			return nil, tc.waitFn(s.Context())
 		})
-
 }

@@ -24,7 +24,7 @@ import (
 )
 
 func getEPTemplate(t *testing.T, d *Daemon) *models.EndpointChangeRequest {
-	ip4, ip6, err := d.ipam.AllocateNext("", "test", ipam.PoolDefault())
+	ip4, ip6, err := d.params.IPAM.AllocateNext("", "test", ipam.PoolDefault())
 	require.NoError(t, err)
 	require.NotNil(t, ip4)
 	require.NotNil(t, ip6)
@@ -66,7 +66,7 @@ func (ds *DaemonSuite) testEndpointAddReservedLabel(t *testing.T) {
 	// reserved:world label.
 	epTemplate.Labels = append(epTemplate.Labels, "reserved:init")
 	_, code, err = ds.endpointAPIManager.CreateEndpoint(context.TODO(), epTemplate)
-	require.Condition(t, errorMatch(err, "not allowed to add reserved labels:.+"))
+	require.ErrorContains(t, err, "not allowed to add reserved labels:")
 	require.Equal(t, apiEndpoint.PutEndpointIDInvalidCode, code)
 
 	// Endpoint was created with invalid data; should transition from
@@ -113,7 +113,7 @@ func (ds *DaemonSuite) testEndpointAddNoLabels(t *testing.T) {
 	// Check that the endpoint has the reserved:init label.
 	v4ip, err := netip.ParseAddr(epTemplate.Addressing.IPV4)
 	require.NoError(t, err)
-	ep, err := ds.d.endpointManager.Lookup(endpointid.NewIPPrefixID(v4ip))
+	ep, err := ds.d.params.EndpointManager.Lookup(endpointid.NewIPPrefixID(v4ip))
 	require.NoError(t, err)
 	require.Equal(t, expectedLabels, ep.GetOpLabels())
 

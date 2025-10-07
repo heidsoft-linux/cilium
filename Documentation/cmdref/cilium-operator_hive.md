@@ -88,11 +88,15 @@ cilium-operator hive [flags]
       --operator-k8s-client-qps float32                      Queries per second limit for the K8s client (default 100)
       --operator-pprof                                       Enable serving pprof debugging API
       --operator-pprof-address string                        Address that pprof listens on (default "localhost")
+      --operator-pprof-block-profile-rate int                Enable goroutine blocking profiling and set the rate of sampled events in nanoseconds (set to 1 to sample all events [warning: performance overhead])
+      --operator-pprof-mutex-profile-fraction int            Enable mutex contention profiling and set the fraction of sampled events (set to 1 to sample all events)
       --operator-pprof-port uint16                           Port that pprof listens on (default 6061)
       --operator-prometheus-serve-addr string                Address to serve Prometheus metrics (default ":9963")
       --policy-default-local-cluster                         Control whether policy rules assume by default the local cluster if not explicitly selected (default true)
       --policy-secrets-namespace string                      Namespace where secrets used in TLS Interception will be synced to. (default "cilium-secrets")
+      --shell-sock-path string                               Path to the shell UNIX socket (default "/var/run/cilium/shell.sock")
       --skip-crd-creation                                    When true, Kubernetes Custom Resource Definitions will not be created
+      --synchronize-k8s-nodes                                Perform GC of stale node entries from the KVStore (default true)
       --validate-network-policy                              Whether to enable or disable the informational network policy validator (default true)
 ```
 

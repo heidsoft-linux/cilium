@@ -29,10 +29,13 @@ db/cmp frontends frontends.table
 lb/maps-dump lbmaps.actual
 * cmp lbmaps.actual maps.expected
 
-# Remove and re-add the service we're redirecting to check that it's
-# reprocessed.
+# Remove service and endpoints. Only the backends for pseudo-service should be present.
 k8s/delete service.yaml endpointslice.yaml
 db/cmp services services-no-echo.table
+db/cmp backends backends-only-redirects.table
+
+# Re-add the service we're redirecting to check that it's
+# reprocessed.
 k8s/add service.yaml endpointslice.yaml
 db/cmp localredirectpolicies lrp.table
 db/cmp services services.table
@@ -48,6 +51,19 @@ k8s/update lrp-svc.yaml
 db/cmp frontends frontends-no-tcp-redirect.table
 sed 'name: "foo"' 'name: "tcp"' lrp-svc.yaml
 k8s/update lrp-svc.yaml
+db/cmp frontends frontends.table
+
+# Policy can be deleted and added back and we'll get to same state
+k8s/delete lrp-svc.yaml
+
+# Policy table is now empty
+* db/empty localredirectpolicies
+db/cmp services services-before.table
+
+# Adding it back gets us to the same state as before
+k8s/add lrp-svc.yaml
+db/cmp localredirectpolicies lrp.table
+db/cmp services services.table
 db/cmp frontends frontends.table
 
 # Removing policy reverts (but we'll get new backend id)
@@ -96,6 +112,13 @@ Address                    Type        ServiceName   PortName   Backends        
 [1001::1]:7070/UDP         ClusterIP   test/echo     udp        [2001::1]:70/UDP      test/lrp-svc:local-redirect   Done
 [1001::1]:8080/TCP         ClusterIP   test/echo     tcp                                                            Done
 
+-- backends-only-redirects.table --
+Address             Instances                           Shadows   NodeName
+10.244.2.1:70/UDP   test/lrp-svc:local-redirect (udp)
+10.244.2.1:80/TCP   test/lrp-svc:local-redirect (tcp)
+[2001::1]:70/UDP    test/lrp-svc:local-redirect (udp)
+[2001::1]:80/TCP    test/lrp-svc:local-redirect (tcp)
+
 -- maps-before.expected --
 BE: ID=1 ADDR=10.244.1.1:7070/UDP STATE=active
 BE: ID=2 ADDR=10.244.1.1:8080/TCP STATE=active
@@ -103,6 +126,8 @@ REV: ID=1 ADDR=169.254.169.254:7070
 REV: ID=2 ADDR=169.254.169.254:8080
 REV: ID=3 ADDR=[1001::1]:7070
 REV: ID=4 ADDR=[1001::1]:8080
+SVC: ID=0 ADDR=169.254.169.254:0/ANY SLOT=0 LBALG=undef AFFTimeout=0 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+non-routable
+SVC: ID=0 ADDR=[1001::1]:0/ANY SLOT=0 LBALG=undef AFFTimeout=0 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+non-routable
 SVC: ID=1 ADDR=169.254.169.254:7070/UDP SLOT=0 LBALG=undef AFFTimeout=0 COUNT=1 QCOUNT=0 FLAGS=ClusterIP+non-routable
 SVC: ID=1 ADDR=169.254.169.254:7070/UDP SLOT=1 BEID=1 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+non-routable
 SVC: ID=2 ADDR=169.254.169.254:8080/TCP SLOT=0 LBALG=undef AFFTimeout=0 COUNT=1 QCOUNT=0 FLAGS=ClusterIP+non-routable
@@ -118,6 +143,8 @@ REV: ID=1 ADDR=169.254.169.254:7070
 REV: ID=2 ADDR=169.254.169.254:8080
 REV: ID=3 ADDR=[1001::1]:7070
 REV: ID=4 ADDR=[1001::1]:8080
+SVC: ID=0 ADDR=169.254.169.254:0/ANY SLOT=0 LBALG=undef AFFTimeout=0 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+non-routable
+SVC: ID=0 ADDR=[1001::1]:0/ANY SLOT=0 LBALG=undef AFFTimeout=0 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+non-routable
 SVC: ID=1 ADDR=169.254.169.254:7070/UDP SLOT=0 LBALG=undef AFFTimeout=0 COUNT=1 QCOUNT=0 FLAGS=LocalRedirect
 SVC: ID=1 ADDR=169.254.169.254:7070/UDP SLOT=1 BEID=3 COUNT=0 QCOUNT=0 FLAGS=LocalRedirect
 SVC: ID=2 ADDR=169.254.169.254:8080/TCP SLOT=0 LBALG=undef AFFTimeout=0 COUNT=1 QCOUNT=0 FLAGS=LocalRedirect
@@ -135,6 +162,8 @@ REV: ID=5 ADDR=169.254.169.254:7070
 REV: ID=6 ADDR=169.254.169.254:8080
 REV: ID=7 ADDR=[1001::1]:7070
 REV: ID=8 ADDR=[1001::1]:8080
+SVC: ID=0 ADDR=169.254.169.254:0/ANY SLOT=0 LBALG=undef AFFTimeout=0 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+non-routable
+SVC: ID=0 ADDR=[1001::1]:0/ANY SLOT=0 LBALG=undef AFFTimeout=0 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+non-routable
 SVC: ID=5 ADDR=169.254.169.254:7070/UDP SLOT=0 LBALG=undef AFFTimeout=0 COUNT=1 QCOUNT=0 FLAGS=LocalRedirect
 SVC: ID=5 ADDR=169.254.169.254:7070/UDP SLOT=1 BEID=9 COUNT=0 QCOUNT=0 FLAGS=LocalRedirect
 SVC: ID=6 ADDR=169.254.169.254:8080/TCP SLOT=0 LBALG=undef AFFTimeout=0 COUNT=1 QCOUNT=0 FLAGS=LocalRedirect
@@ -144,16 +173,18 @@ SVC: ID=7 ADDR=[1001::1]:7070/UDP SLOT=1 BEID=11 COUNT=0 QCOUNT=0 FLAGS=LocalRed
 SVC: ID=8 ADDR=[1001::1]:8080/TCP SLOT=0 LBALG=undef AFFTimeout=0 COUNT=1 QCOUNT=0 FLAGS=LocalRedirect
 SVC: ID=8 ADDR=[1001::1]:8080/TCP SLOT=1 BEID=12 COUNT=0 QCOUNT=0 FLAGS=LocalRedirect
 -- maps-after.expected --
-BE: ID=16 ADDR=10.244.1.1:7070/UDP STATE=active
-BE: ID=17 ADDR=10.244.1.1:8080/TCP STATE=active
+BE: ID=22 ADDR=10.244.1.1:7070/UDP STATE=active
+BE: ID=23 ADDR=10.244.1.1:8080/TCP STATE=active
 REV: ID=5 ADDR=169.254.169.254:7070
 REV: ID=6 ADDR=169.254.169.254:8080
 REV: ID=7 ADDR=[1001::1]:7070
 REV: ID=8 ADDR=[1001::1]:8080
+SVC: ID=0 ADDR=169.254.169.254:0/ANY SLOT=0 LBALG=undef AFFTimeout=0 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+non-routable
+SVC: ID=0 ADDR=[1001::1]:0/ANY SLOT=0 LBALG=undef AFFTimeout=0 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+non-routable
 SVC: ID=5 ADDR=169.254.169.254:7070/UDP SLOT=0 LBALG=undef AFFTimeout=0 COUNT=1 QCOUNT=0 FLAGS=ClusterIP+non-routable
-SVC: ID=5 ADDR=169.254.169.254:7070/UDP SLOT=1 BEID=16 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+non-routable
+SVC: ID=5 ADDR=169.254.169.254:7070/UDP SLOT=1 BEID=22 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+non-routable
 SVC: ID=6 ADDR=169.254.169.254:8080/TCP SLOT=0 LBALG=undef AFFTimeout=0 COUNT=1 QCOUNT=0 FLAGS=ClusterIP+non-routable
-SVC: ID=6 ADDR=169.254.169.254:8080/TCP SLOT=1 BEID=17 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+non-routable
+SVC: ID=6 ADDR=169.254.169.254:8080/TCP SLOT=1 BEID=23 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+non-routable
 SVC: ID=7 ADDR=[1001::1]:7070/UDP SLOT=0 LBALG=undef AFFTimeout=0 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+non-routable
 SVC: ID=8 ADDR=[1001::1]:8080/TCP SLOT=0 LBALG=undef AFFTimeout=0 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+non-routable
 -- lrp-svc.yaml --
@@ -172,10 +203,10 @@ spec:
       matchLabels:
         app: proxy
     toPorts:
-      - port: "8080"
+      - port: "80"
         name: "tcp"
         protocol: TCP
-      - port: "7070"
+      - port: "70"
         name: "udp"
         protocol: UDP
 

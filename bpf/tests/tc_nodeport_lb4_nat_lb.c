@@ -149,29 +149,14 @@ mock_ctx_redirect(const struct __sk_buff *ctx __maybe_unused,
 	return CTX_ACT_DROP;
 }
 
-#include "bpf_host.c"
+#include "lib/bpf_host.h"
 
 #include "lib/egressgw_policy.h"
 #include "lib/endpoint.h"
 #include "lib/ipcache.h"
 #include "lib/lb.h"
 
-#define FROM_NETDEV	0
-#define TO_NETDEV	1
-
 ASSIGN_CONFIG(__u32, interface_ifindex, DEFAULT_IFACE)
-
-struct {
-	__uint(type, BPF_MAP_TYPE_PROG_ARRAY);
-	__uint(key_size, sizeof(__u32));
-	__uint(max_entries, 2);
-	__array(values, int());
-} entry_call_map __section(".maps") = {
-	.values = {
-		[FROM_NETDEV] = &cil_from_netdev,
-		[TO_NETDEV] = &cil_to_netdev,
-	},
-};
 
 /* Test that a SVC request to a local backend
  * - gets DNATed (but not SNATed)
@@ -219,10 +204,7 @@ int nodeport_local_backend_setup(struct __ctx_buff *ctx)
 
 	ipcache_v4_add_entry(BACKEND_IP_LOCAL, 0, 112233, 0, 0);
 
-	/* Jump into the entrypoint */
-	tail_call_static(ctx, entry_call_map, FROM_NETDEV);
-	/* Fail if we didn't jump */
-	return TEST_ERROR;
+	return netdev_receive_packet(ctx);
 }
 
 CHECK("tc", "tc_nodeport_local_backend")
@@ -315,10 +297,7 @@ int nodeport_local_backend_reply_pktgen(struct __ctx_buff *ctx)
 SETUP("tc", "tc_nodeport_local_backend_reply")
 int nodeport_local_backend_reply_setup(struct __ctx_buff *ctx)
 {
-	/* Jump into the entrypoint */
-	tail_call_static(ctx, entry_call_map, TO_NETDEV);
-	/* Fail if we didn't jump */
-	return TEST_ERROR;
+	return netdev_send_packet(ctx);
 }
 
 CHECK("tc", "tc_nodeport_local_backend_reply")
@@ -413,10 +392,7 @@ int nodeport_local_backend_redirect_pktgen(struct __ctx_buff *ctx)
 SETUP("tc", "tc_nodeport_local_backend_redirect")
 int nodeport_local_backend_redirect_setup(struct __ctx_buff *ctx)
 {
-	/* Jump into the entrypoint */
-	tail_call_static(ctx, entry_call_map, FROM_NETDEV);
-	/* Fail if we didn't jump */
-	return TEST_ERROR;
+	return netdev_receive_packet(ctx);
 }
 
 CHECK("tc", "tc_nodeport_local_backend_redirect")
@@ -511,10 +487,7 @@ int nodeport_local_backend_redirect_reply_pktgen(struct __ctx_buff *ctx)
 SETUP("tc", "tc_nodeport_local_backend_redirect_reply")
 int nodeport_local_backend_redirect_reply_setup(struct __ctx_buff *ctx)
 {
-	/* Jump into the entrypoint */
-	tail_call_static(ctx, entry_call_map, TO_NETDEV);
-	/* Fail if we didn't jump */
-	return TEST_ERROR;
+	return netdev_send_packet(ctx);
 }
 
 CHECK("tc", "tc_nodeport_local_backend_redirect_reply")
@@ -616,10 +589,7 @@ int nodeport_udp_local_backend_setup(struct __ctx_buff *ctx)
 	lb_v4_add_backend(FRONTEND_IP_LOCAL, FRONTEND_PORT, 1, 125,
 			  BACKEND_IP_LOCAL, BACKEND_PORT, IPPROTO_UDP, 0);
 
-	/* Jump into the entrypoint */
-	tail_call_static(ctx, entry_call_map, FROM_NETDEV);
-	/* Fail if we didn't jump */
-	return TEST_ERROR;
+	return netdev_receive_packet(ctx);
 }
 
 CHECK("tc", "tc_nodeport_udp_local_backend")
@@ -723,10 +693,7 @@ int nodeport_nat_fwd_setup(struct __ctx_buff *ctx)
 
 	ipcache_v4_add_entry(BACKEND_IP_REMOTE, 0, 112233, 0, 0);
 
-	/* Jump into the entrypoint */
-	tail_call_static(ctx, entry_call_map, FROM_NETDEV);
-	/* Fail if we didn't jump */
-	return TEST_ERROR;
+	return netdev_receive_packet(ctx);
 }
 
 CHECK("tc", "tc_nodeport_nat_fwd")
@@ -735,7 +702,6 @@ int nodeport_nat_fwd_check(__maybe_unused const struct __ctx_buff *ctx)
 	void *data, *data_end;
 	__u32 *status_code;
 	struct tcphdr *l4;
-	struct ethhdr *l2;
 	struct iphdr *l3;
 	__u32 key = 0;
 
@@ -751,22 +717,13 @@ int nodeport_nat_fwd_check(__maybe_unused const struct __ctx_buff *ctx)
 
 	assert(*status_code == CTX_ACT_REDIRECT);
 
-	l2 = data + sizeof(__u32);
-	if ((void *)l2 + sizeof(struct ethhdr) > data_end)
-		test_fatal("l2 out of bounds");
-
-	l3 = (void *)l2 + sizeof(struct ethhdr);
+	l3 = data + sizeof(__u32) + sizeof(struct ethhdr);
 	if ((void *)l3 + sizeof(struct iphdr) > data_end)
 		test_fatal("l3 out of bounds");
 
 	l4 = (void *)l3 + sizeof(struct iphdr);
 	if ((void *)l4 + sizeof(struct tcphdr) > data_end)
 		test_fatal("l4 out of bounds");
-
-	if (memcmp(l2->h_source, (__u8 *)lb_mac, ETH_ALEN) != 0)
-		test_fatal("src MAC is not the LB MAC")
-	if (memcmp(l2->h_dest, (__u8 *)remote_backend_mac, ETH_ALEN) != 0)
-		test_fatal("dst MAC is not the remote backend MAC")
 
 	if (l3->saddr != LB_IP)
 		test_fatal("src IP hasn't been NATed to LB IP");
@@ -824,12 +781,11 @@ static __always_inline int build_reply(struct __ctx_buff *ctx)
 	return 0;
 }
 
-static __always_inline int check_reply(const struct __ctx_buff *ctx, bool check_l2)
+static __always_inline int check_reply(const struct __ctx_buff *ctx)
 {
 	void *data, *data_end;
 	__u32 *status_code;
 	struct tcphdr *l4;
-	struct ethhdr *l2;
 	struct iphdr *l3;
 
 	test_init();
@@ -844,24 +800,13 @@ static __always_inline int check_reply(const struct __ctx_buff *ctx, bool check_
 
 	assert(*status_code == CTX_ACT_REDIRECT);
 
-	l2 = data + sizeof(__u32);
-	if ((void *)l2 + sizeof(struct ethhdr) > data_end)
-		test_fatal("l2 out of bounds");
-
-	l3 = (void *)l2 + sizeof(struct ethhdr);
+	l3 = data + sizeof(__u32) + sizeof(struct ethhdr);
 	if ((void *)l3 + sizeof(struct iphdr) > data_end)
 		test_fatal("l3 out of bounds");
 
 	l4 = (void *)l3 + sizeof(struct iphdr);
 	if ((void *)l4 + sizeof(struct tcphdr) > data_end)
 		test_fatal("l4 out of bounds");
-
-	if (check_l2) {
-		if (memcmp(l2->h_source, (__u8 *)lb_mac, ETH_ALEN) != 0)
-			test_fatal("src MAC is not the LB MAC")
-		if (memcmp(l2->h_dest, (__u8 *)client_mac, ETH_ALEN) != 0)
-			test_fatal("dst MAC is not the client MAC")
-	}
 
 	if (l3->saddr != FRONTEND_IP_REMOTE)
 		test_fatal("src IP hasn't been RevNATed to frontend IP");
@@ -893,16 +838,13 @@ int nodeport_nat_fwd_reply_pktgen(struct __ctx_buff *ctx)
 SETUP("tc", "tc_nodeport_nat_fwd_reply")
 int nodeport_nat_fwd_reply_setup(struct __ctx_buff *ctx)
 {
-	/* Jump into the entrypoint */
-	tail_call_static(ctx, entry_call_map, FROM_NETDEV);
-	/* Fail if we didn't jump */
-	return TEST_ERROR;
+	return netdev_receive_packet(ctx);
 }
 
 CHECK("tc", "tc_nodeport_nat_fwd_reply")
 int nodeport_nat_fwd_reply_check(const struct __ctx_buff *ctx)
 {
-	return check_reply(ctx, true);
+	return check_reply(ctx);
 }
 
 /* Test that the LB RevDNATs and RevSNATs a reply from the
@@ -921,10 +863,7 @@ int nodeport_nat_fwd_reply2_egw_setup(struct __ctx_buff *ctx)
 	ipcache_v4_add_entry(CLIENT_IP, 0, 112200, CLIENT_NODE_IP, 0);
 	add_egressgw_policy_entry(CLIENT_IP, v4_all, 0, LB_IP, LB_IP);
 
-	/* Jump into the entrypoint */
-	tail_call_static(ctx, entry_call_map, FROM_NETDEV);
-	/* Fail if we didn't jump */
-	return TEST_ERROR;
+	return netdev_receive_packet(ctx);
 }
 
 CHECK("tc", "tc_nodeport_nat_fwd_reply2_egw")
@@ -932,7 +871,7 @@ int nodeport_nat_fwd_reply2_egw_check(const struct __ctx_buff *ctx)
 {
 	del_egressgw_policy_entry(CLIENT_IP, v4_all, 0);
 
-	return check_reply(ctx, true);
+	return check_reply(ctx);
 }
 
 /* Test that the LB RevDNATs and RevSNATs a reply from the
@@ -954,17 +893,13 @@ int nodeport_nat_fwd_reply_no_fib_setup(struct __ctx_buff *ctx)
 	if (settings)
 		settings->fail_fib = true;
 
-	/* Jump into the entrypoint */
-	tail_call_static(ctx, entry_call_map, FROM_NETDEV);
-	/* Fail if we didn't jump */
-	return TEST_ERROR;
+	return netdev_receive_packet(ctx);
 }
 
 CHECK("tc", "tc_nodeport_nat_fwd_reply_no_fib")
 int nodeport_nat_fwd_reply_no_fib_check(__maybe_unused const struct __ctx_buff *ctx)
 {
-	/* Don't check L2 addresses, they get handled by redirect_neigh(). */
-	return check_reply(ctx, false);
+	return check_reply(ctx);
 }
 
 /* The following three tests are checking the scenario where a Rev NAT entry gets
@@ -1006,10 +941,7 @@ int nodeport_nat_fwd_reply_punt_setup(struct __ctx_buff *ctx)
 	if IS_ERR(map_delete_elem(&cilium_snat_v4_external, &rtuple))
 		return TEST_ERROR;
 
-	/* Jump into the entrypoint */
-	tail_call_static(ctx, entry_call_map, FROM_NETDEV);
-	/* Fail if we didn't jump */
-	return TEST_ERROR;
+	return netdev_receive_packet(ctx);
 }
 
 CHECK("tc", "tc_nodeport_nat_fwd_reply_punt")
@@ -1084,10 +1016,7 @@ int nodeport_nat_fwd_restore_setup(struct __ctx_buff *ctx)
 
 	ipcache_v4_add_entry(BACKEND_IP_REMOTE, 0, 112233, 0, 0);
 
-	/* Jump into the entrypoint */
-	tail_call_static(ctx, entry_call_map, FROM_NETDEV);
-	/* Fail if we didn't jump */
-	return TEST_ERROR;
+	return netdev_receive_packet(ctx);
 }
 
 CHECK("tc", "tc_nodeport_nat_fwd_restore")
@@ -1096,7 +1025,6 @@ int nodeport_nat_fwd_restore_check(__maybe_unused const struct __ctx_buff *ctx)
 	void *data, *data_end;
 	__u32 *status_code;
 	struct tcphdr *l4;
-	struct ethhdr *l2;
 	struct iphdr *l3;
 	__u32 key = 0;
 
@@ -1112,22 +1040,13 @@ int nodeport_nat_fwd_restore_check(__maybe_unused const struct __ctx_buff *ctx)
 
 	assert(*status_code == CTX_ACT_REDIRECT);
 
-	l2 = data + sizeof(__u32);
-	if ((void *)l2 + sizeof(struct ethhdr) > data_end)
-		test_fatal("l2 out of bounds");
-
-	l3 = (void *)l2 + sizeof(struct ethhdr);
+	l3 = data + sizeof(__u32) + sizeof(struct ethhdr);
 	if ((void *)l3 + sizeof(struct iphdr) > data_end)
 		test_fatal("l3 out of bounds");
 
 	l4 = (void *)l3 + sizeof(struct iphdr);
 	if ((void *)l4 + sizeof(struct tcphdr) > data_end)
 		test_fatal("l4 out of bounds");
-
-	if (memcmp(l2->h_source, (__u8 *)lb_mac, ETH_ALEN) != 0)
-		test_fatal("src MAC is not the LB MAC")
-	if (memcmp(l2->h_dest, (__u8 *)remote_backend_mac, ETH_ALEN) != 0)
-		test_fatal("dst MAC is not the remote backend MAC")
 
 	if (l3->saddr != LB_IP)
 		test_fatal("src IP hasn't been NATed to LB IP");
@@ -1164,16 +1083,13 @@ int nodeport_nat_fwd_restore_reply_pktgen(struct __ctx_buff *ctx)
 SETUP("tc", "tc_nodeport_nat_fwd_restore_reply")
 int nodeport_nat_fwd_restore_reply_setup(struct __ctx_buff *ctx)
 {
-	/* Jump into the entrypoint */
-	tail_call_static(ctx, entry_call_map, FROM_NETDEV);
-	/* Fail if we didn't jump */
-	return TEST_ERROR;
+	return netdev_receive_packet(ctx);
 }
 
 CHECK("tc", "tc_nodeport_nat_fwd_restore_reply")
 int nodeport_nat_fwd_restore_reply_check(const struct __ctx_buff *ctx)
 {
-	return check_reply(ctx, true);
+	return check_reply(ctx);
 }
 
  /* The following three tests are checking the scenario where a Original NAT entry gets deleted:
@@ -1234,10 +1150,7 @@ int nodeport_nat_fwd_original_renated_setup(struct __ctx_buff *ctx)
 	if IS_ERR(map_delete_elem(&cilium_snat_v4_external, &otuple))
 		return TEST_ERROR;
 
-	/* Jump into the entrypoint */
-	tail_call_static(ctx, entry_call_map, FROM_NETDEV);
-	/* Fail if we didn't jump */
-	return TEST_ERROR;
+	return netdev_receive_packet(ctx);
 }
 
 CHECK("tc", "tc_nodeport_nat_fwd_original_renated")
@@ -1246,7 +1159,6 @@ int nodeport_nat_fwd_original_renated_check(const struct __ctx_buff *ctx)
 	void *data, *data_end;
 	__u32 *status_code;
 	struct tcphdr *l4;
-	struct ethhdr *l2;
 	struct iphdr *l3;
 	__u32 key = 0;
 	__u16 nat_source_port = 0;
@@ -1263,22 +1175,13 @@ int nodeport_nat_fwd_original_renated_check(const struct __ctx_buff *ctx)
 
 	assert(*status_code == CTX_ACT_REDIRECT);
 
-	l2 = data + sizeof(__u32);
-	if ((void *)l2 + sizeof(struct ethhdr) > data_end)
-		test_fatal("l2 out of bounds");
-
-	l3 = (void *)l2 + sizeof(struct ethhdr);
+	l3 = data + sizeof(__u32) + sizeof(struct ethhdr);
 	if ((void *)l3 + sizeof(struct iphdr) > data_end)
 		test_fatal("l3 out of bounds");
 
 	l4 = (void *)l3 + sizeof(struct iphdr);
 	if ((void *)l4 + sizeof(struct tcphdr) > data_end)
 		test_fatal("l4 out of bounds");
-
-	if (memcmp(l2->h_source, (__u8 *)lb_mac, ETH_ALEN) != 0)
-		test_fatal("src MAC is not the LB MAC")
-	if (memcmp(l2->h_dest, (__u8 *)remote_backend_mac, ETH_ALEN) != 0)
-		test_fatal("dst MAC is not the remote backend MAC")
 
 	if (l3->saddr != LB_IP)
 		test_fatal("src IP hasn't been NATed to LB IP");
@@ -1335,16 +1238,13 @@ int nodeport_nat_fwd_restore_original_entry_setup(struct __ctx_buff *ctx)
 	if IS_ERR(map_delete_elem(&cilium_snat_v4_external, &otuple))
 		return TEST_ERROR;
 
-	/* Jump into the entrypoint */
-	tail_call_static(ctx, entry_call_map, FROM_NETDEV);
-	/* Fail if we didn't jump */
-	return TEST_ERROR;
+	return netdev_receive_packet(ctx);
 }
 
 CHECK("tc", "tc_nodeport_nat_fwd_restore_original_entry")
 int nodeport_nat_fwd_restore_original_entry_check(struct __ctx_buff *ctx)
 {
-	return check_reply(ctx, true);
+	return check_reply(ctx);
 }
 
 /* Test that a SVC request that is LBed to a NAT remote backend
@@ -1389,10 +1289,7 @@ int nodeport_nat_fwd_verify_restored_original_entry_setup(struct __ctx_buff *ctx
 			  BACKEND_IP_REMOTE, BACKEND_PORT, IPPROTO_TCP, 0);
 	ipcache_v4_add_entry(BACKEND_IP_REMOTE, 0, 112233, 0, 0);
 
-	/* Jump into the entrypoint */
-	tail_call_static(ctx, entry_call_map, FROM_NETDEV);
-	/* Fail if we didn't jump */
-	return TEST_ERROR;
+	return netdev_receive_packet(ctx);
 }
 
 CHECK("tc", "tc_nodeport_nat_fwd_verify_restored_original_entry")
@@ -1401,7 +1298,6 @@ int nodeport_nat_fwd_verify_restored_original_entry_check(struct __ctx_buff *ctx
 	void *data, *data_end;
 	__u32 *status_code;
 	struct tcphdr *l4;
-	struct ethhdr *l2;
 	struct iphdr *l3;
 	__u32 key = 0;
 	__u16 nat_source_port = 0;
@@ -1418,22 +1314,13 @@ int nodeport_nat_fwd_verify_restored_original_entry_check(struct __ctx_buff *ctx
 
 	assert(*status_code == CTX_ACT_REDIRECT);
 
-	l2 = data + sizeof(__u32);
-	if ((void *)l2 + sizeof(struct ethhdr) > data_end)
-		test_fatal("l2 out of bounds");
-
-	l3 = (void *)l2 + sizeof(struct ethhdr);
+	l3 = data + sizeof(__u32) + sizeof(struct ethhdr);
 	if ((void *)l3 + sizeof(struct iphdr) > data_end)
 		test_fatal("l3 out of bounds");
 
 	l4 = (void *)l3 + sizeof(struct iphdr);
 	if ((void *)l4 + sizeof(struct tcphdr) > data_end)
 		test_fatal("l4 out of bounds");
-
-	if (memcmp(l2->h_source, (__u8 *)lb_mac, ETH_ALEN) != 0)
-		test_fatal("src MAC is not the LB MAC")
-	if (memcmp(l2->h_dest, (__u8 *)remote_backend_mac, ETH_ALEN) != 0)
-		test_fatal("dst MAC is not the remote backend MAC")
 
 	if (l3->saddr != LB_IP)
 		test_fatal("src IP hasn't been NATed to LB IP");

@@ -263,7 +263,7 @@ func newMultiPoolManager(logger *slog.Logger, conf *option.DaemonConfig, node ag
 
 	k8sController := controller.NewManager()
 	k8sUpdater, err := trigger.NewTrigger(trigger.Parameters{
-		MinInterval: 15 * time.Second,
+		MinInterval: conf.IPAMCiliumNodeUpdateRate,
 		TriggerFunc: func(reasons []string) {
 			k8sController.TriggerController(multiPoolControllerName)
 		},
@@ -393,6 +393,10 @@ func (m *multiPoolManager) waitForPool(ctx context.Context, family Family, poolN
 }
 
 func (m *multiPoolManager) ciliumNodeUpdated(newNode *ciliumv2.CiliumNode) {
+	// Once allocations are processed update the local node state with the allocated
+	// CIDRs.
+	defer m.updateLocalNodeStore(newNode)
+
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
@@ -512,18 +516,16 @@ func (m *multiPoolManager) isRestoreFinishedLocked(family Family) bool {
 
 func (m *multiPoolManager) updateLocalNodeStore(newNode *ciliumv2.CiliumNode) {
 	no := nodeTypes.ParseCiliumNode(newNode)
-	if option.Config.EnableIPv4 {
-		m.localNodeStore.Update(func(n *node.LocalNode) {
+	m.localNodeStore.Update(func(n *node.LocalNode) {
+		if option.Config.EnableIPv4 && no.IPv4AllocCIDR != nil {
 			n.IPv4AllocCIDR = no.IPv4AllocCIDR
 			n.IPv4SecondaryAllocCIDRs = no.IPv4SecondaryAllocCIDRs
-		})
-	}
-	if option.Config.EnableIPv6 {
-		m.localNodeStore.Update(func(n *node.LocalNode) {
+		}
+		if option.Config.EnableIPv6 && no.IPv6AllocCIDR != nil {
 			n.IPv6AllocCIDR = no.IPv6AllocCIDR
 			n.IPv6SecondaryAllocCIDRs = no.IPv6SecondaryAllocCIDRs
-		})
-	}
+		}
+	})
 }
 
 func (m *multiPoolManager) updateLocalNode(ctx context.Context) error {
@@ -596,8 +598,6 @@ func (m *multiPoolManager) updateLocalNode(ctx context.Context) error {
 	newNode.Spec.IPAM.Pools.Allocated = allocated
 
 	m.mutex.Unlock()
-
-	m.updateLocalNodeStore(newNode)
 
 	if !newNode.Spec.IPAM.DeepEqual(&m.node.Spec.IPAM) {
 		_, err := m.nodeUpdater.Update(ctx, newNode, metav1.UpdateOptions{})

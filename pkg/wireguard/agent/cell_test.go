@@ -30,7 +30,9 @@ import (
 	"github.com/cilium/cilium/pkg/datapath/tunnel"
 	"github.com/cilium/cilium/pkg/dial"
 	"github.com/cilium/cilium/pkg/endpoint/regeneration"
+	envoyCfg "github.com/cilium/cilium/pkg/envoy/config"
 	"github.com/cilium/cilium/pkg/hive"
+	"github.com/cilium/cilium/pkg/identity/cache"
 	"github.com/cilium/cilium/pkg/ipcache"
 	k8sClient "github.com/cilium/cilium/pkg/k8s/client/testutils"
 	k8sSynced "github.com/cilium/cilium/pkg/k8s/synced"
@@ -48,6 +50,7 @@ import (
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/source"
 	"github.com/cilium/cilium/pkg/testutils"
+	identityTestutils "github.com/cilium/cilium/pkg/testutils/identity"
 	"github.com/cilium/cilium/pkg/testutils/netns"
 	"github.com/cilium/cilium/pkg/time"
 	"github.com/cilium/cilium/pkg/wireguard/types"
@@ -120,14 +123,15 @@ func TestPrivileged_TestWireGuardCell(t *testing.T) {
 			writer.Cell,
 			ipset.Cell,
 			k8s.ResourcesCell,
+			cell.Config(envoyCfg.SecretSyncConfig{}),
 			k8sClient.FakeClientCell(),
 			kvstore.Cell(kvstore.DisabledBackendName),
+			node.LocalNodeStoreTestCell,
 
 			cell.Provide(
 				newWireguardAgent,
 				newWireguardConfig,
 
-				node.NewTestLocalNodeStore,
 				regeneration.NewFence,
 				tables.NewDeviceTable,
 				tables.NewNodeAddressTable,
@@ -168,8 +172,10 @@ func TestPrivileged_TestWireGuardCell(t *testing.T) {
 							},
 						},
 						IPCache: ipcache.NewIPCache(&ipcache.Configuration{
-							Context: ctx,
-							Logger:  hivetest.Logger(t),
+							Context:           ctx,
+							Logger:            hivetest.Logger(t),
+							IdentityAllocator: cache.NewNoopIdentityAllocator(log),
+							IdentityUpdater:   &identityTestutils.IdentityAllocatorOwnerMock{},
 						}),
 						K8SAPIGroups:          &k8sSynced.APIGroups{},
 						K8SResources:          &k8sSynced.Resources{},
@@ -185,8 +191,6 @@ func TestPrivileged_TestWireGuardCell(t *testing.T) {
 			),
 
 			cell.Invoke(
-				statedb.RegisterTable[tables.NodeAddress],
-				statedb.RegisterTable[*tables.Device],
 				func(a types.WireguardAgent, n *nodediscovery.NodeDiscovery, s *node.LocalNodeStore, u nodeManager.NodeManager, i *ipcache.IPCache, c k8sSynced.CacheStatus) {
 					wgAgent = a.(*Agent)
 					nodeDiscovery = n

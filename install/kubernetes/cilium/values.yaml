@@ -501,6 +501,12 @@ bgpControlPlane:
     mode: "default"
     # -- IP pool to allocate the BGP router-id from when the mode is ip-pool.
     ipPool: ""
+  # -- Legacy BGP ORIGIN attribute settings (BGPv2 only)
+  legacyOriginAttribute:
+    # -- Enable/Disable advertising LoadBalancerIP routes with the legacy
+    # BGP ORIGIN attribute value INCOMPLETE (2) instead of the default IGP (0).
+    # Enable for compatibility with the legacy behavior of MetalLB integration.
+    enabled: false
 pmtuDiscovery:
   # -- Enable path MTU discovery to send ICMP fragmentation-needed replies to
   # the client.
@@ -552,7 +558,7 @@ bpf:
   # Helm configuration for BPF events map rate limiting is experimental and might change
   # in upcoming releases.
   events:
-    # -- Default settings for all types of events except dbg and pcap.
+    # -- Default settings for all types of events except dbg.
     default:
       # @schema
       # type: [null, integer]
@@ -612,6 +618,12 @@ bpf:
   # type: [null, integer]
   # @schema
   policyMapMax: 16384
+  # -- (float64) Configure threshold for emitting pressure metrics of policy maps.
+  # @schema
+  # type: [null, number]
+  # @schema
+  # @default -- `0.1`
+  policyMapPressureMetricsThreshold: ~
   # -- Configure the maximum number of entries in global policy stats map.
   # @schema
   # type: [null, integer]
@@ -1143,6 +1155,8 @@ healthCheckICMPFailureThreshold: 3
 hostFirewall:
   # -- Enables the enforcement of host policies in the eBPF datapath.
   enabled: false
+# -- Enable routing to a service that has zero endpoints
+enableNoServiceEndpointsRoutable: true
 # -- Configure socket LB
 socketLB:
   # -- Enable socket LB
@@ -1210,6 +1224,9 @@ hubble:
   #   1, 3, 7, 15, 31, 63, 127, 255, 511, 1023,
   #   2047, 4095, 8191, 16383, 32767, 65535
   # eventBufferCapacity: "4095"
+
+  # -- The interval at which Hubble will send out lost events from the Observer server, if any.
+  # lostEventSendInterval: 1s
 
   # -- Hubble metrics configuration.
   # See https://docs.cilium.io/en/stable/observability/metrics/#hubble-metrics
@@ -1400,7 +1417,7 @@ hubble:
         #   --set hubble.redact.http.headers.deny="Authorization,Proxy-Authorization"
         deny: []
     kafka:
-      # -- Enables redacting Kafka's API key.
+      # -- Enables redacting Kafka's API key (deprecated, will be removed in v1.19).
       # Example:
       #
       #   redact:
@@ -1717,6 +1734,10 @@ hubble:
       address: localhost
       # -- Configure pprof listen port for hubble-relay
       port: 6062
+      # -- Enable mutex contention profiling for hubble-relay and set the fraction of sampled events (set to 1 to sample all events)
+      mutexProfileFraction: 0
+      # -- Enable goroutine blocking profiling for hubble-relay and set the rate of sampled events in nanoseconds (set to 1 to sample all events [warning: performance overhead])
+      blockProfileRate: 0
   ui:
     # -- Whether to enable the Hubble UI.
     enabled: false
@@ -1763,8 +1784,8 @@ hubble:
         # @schema
         override: ~
         repository: "quay.io/cilium/hubble-ui-backend"
-        tag: "v0.13.2"
-        digest: "sha256:a034b7e98e6ea796ed26df8f4e71f83fc16465a19d166eff67a03b822c0bfa15"
+        tag: "v0.13.3"
+        digest: "sha256:db1454e45dc39ca41fbf7cad31eec95d99e5b9949c39daaad0fa81ef29d56953"
         useDigest: true
         pullPolicy: "Always"
       # -- Hubble-ui backend security context.
@@ -1798,8 +1819,8 @@ hubble:
         # @schema
         override: ~
         repository: "quay.io/cilium/hubble-ui"
-        tag: "v0.13.2"
-        digest: "sha256:9e37c1296b802830834cc87342a9182ccbb71ffebb711971e849221bd9d59392"
+        tag: "v0.13.3"
+        digest: "sha256:661d5de7050182d495c6497ff0b007a7a1e379648e60830dd68c4d78ae21761d"
         useDigest: true
         pullPolicy: "Always"
       # -- Hubble-ui frontend security context.
@@ -2109,8 +2130,10 @@ readinessProbe:
 # -- Configure the kube-proxy replacement in Cilium BPF datapath
 # Valid options are "true" or "false".
 # ref: https://docs.cilium.io/en/stable/network/kubernetes/kubeproxy-free/
-#kubeProxyReplacement: "false"
-
+# @schema@
+# type: [string, boolean]
+# @schema@
+kubeProxyReplacement: "false"
 # -- healthz server bind address for the kube-proxy replacement.
 # To enable set the value to '0.0.0.0:10256' for all ipv4
 # addresses and this '[::]:10256' for all ipv6 addresses.
@@ -2154,7 +2177,7 @@ maglev: {}
 # type: [null, boolean]
 # @schema
 # -- (bool) Enables masquerading of IPv4 traffic leaving the node from endpoints.
-# @default -- `true` unless ipam eni mode is active 
+# @default -- `true` unless ipam eni mode is active
 enableIPv4Masquerade: ~
 # -- Enables masquerading of IPv6 traffic leaving the node from endpoints.
 enableIPv6Masquerade: true
@@ -2265,8 +2288,6 @@ loadBalancer:
     algorithm: round_robin
 # -- Configure N-S k8s service loadbalancing
 nodePort:
-  # -- Enable the Cilium NodePort service implementation.
-  enabled: false
   # -- Port range to use for NodePort services.
   # range: "30000,32767"
 
@@ -2310,6 +2331,10 @@ pprof:
   address: localhost
   # -- Configure pprof listen port for cilium-agent
   port: 6060
+  # -- Enable mutex contention profiling for cilium-agent and set the fraction of sampled events (set to 1 to sample all events)
+  mutexProfileFraction: 0
+  # -- Enable goroutine blocking profiling for cilium-agent and set the rate of sampled events in nanoseconds (set to 1 to sample all events [warning: performance overhead])
+  blockProfileRate: 0
 # -- Configure prometheus metrics on the configured port at /metrics
 prometheus:
   metricsService: false
@@ -2464,9 +2489,9 @@ envoy:
     # @schema
     override: ~
     repository: "quay.io/cilium/cilium-envoy"
-    tag: "v1.35.0-1754542821-43b62ac18029bf5e22cbcc9e7141ee55eb09555d"
+    tag: "v1.35.3-1759553787-f16dc8e69dee56f4e376afef9676c7b9d659ac37"
     pullPolicy: "Always"
-    digest: "sha256:2173f013b41e71cf8d65503cc9710c106746efbd93ae0ef3f46ee65de13b19f6"
+    digest: "sha256:946dcd9e525b644f13a7158c3bafca7d9e901209ceb2833934e73311fab84c76"
     useDigest: true
   # -- Additional containers added to the cilium Envoy DaemonSet.
   extraContainers: []
@@ -2698,7 +2723,6 @@ resourceQuotas:
       pods: "15"
 # Need to document default
 ##################
-#sessionAffinity: false
 
 # -- Annotations to be added to all cilium-secret namespaces (resources under templates/cilium-secrets-namespace)
 secretsNamespaceAnnotations: {}
@@ -2706,8 +2730,6 @@ secretsNamespaceAnnotations: {}
 # uninstall Cilium as it will stop Cilium from starting and create artifacts
 # in the node.
 sleepAfterInit: false
-# -- Enable check of service source ranges (currently, only for LoadBalancer).
-svcSourceRangeCheck: true
 # -- Synchronize Kubernetes nodes to kvstore and perform CNP GC.
 synchronizeK8sNodes: true
 # -- Configure TLS configuration in the agent.
@@ -2810,6 +2832,11 @@ tunnelSourcePortRange: 0-0
 #  - reject (default)
 #  - drop
 serviceNoBackendResponse: reject
+# -- Configure what the response should be to pod egress traffic denied by network policy.
+# Possible values:
+#  - none (default)
+#  - icmp
+policyDenyResponse: none
 # -- Configure the underlying network MTU to overwrite auto-detected MTU.
 # This value doesn't change the host network interface MTU i.e. eth0 or ens0.
 # It changes the MTU for cilium_net@cilium_host, cilium_host@cilium_net,
@@ -2902,6 +2929,8 @@ operator:
       operator: Exists
     - key: "node.kubernetes.io/not-ready"
       operator: Exists
+    - key: "node.cloudprovider.kubernetes.io/uninitialized"
+      operator: Exists
   # -- Additional cilium-operator container arguments.
   extraArgs: []
   # -- Additional cilium-operator environment variables.
@@ -2985,6 +3014,10 @@ operator:
     address: localhost
     # -- Configure pprof listen port for cilium-operator
     port: 6061
+    # -- Enable mutex contention profiling for cilium-operator and set the fraction of sampled events (set to 1 to sample all events)
+    mutexProfileFraction: 0
+    # -- Enable goroutine blocking profiling for cilium-operator and set the rate of sampled events in nanoseconds (set to 1 to sample all events [warning: performance overhead])
+    blockProfileRate: 0
   # -- Enable prometheus metrics for cilium-operator on the configured port at
   # /metrics
   prometheus:
@@ -3051,6 +3084,12 @@ operator:
     # -- Interval, in seconds, to check if there are any pods that are not
     # managed by Cilium.
     intervalSeconds: 15
+    # -- Selector for pods that should be restarted when not managed by Cilium.
+    # If not set, defaults to built-in selector "k8s-app=kube-dns". Set to empty string to select all pods.
+    # @schema
+    # type: [null, string]
+    # @schema
+    selector: ~
 nodeinit:
   # -- Enable the node initialization DaemonSet
   enabled: false
@@ -3061,8 +3100,8 @@ nodeinit:
     # @schema
     override: ~
     repository: "quay.io/cilium/startup-script"
-    tag: "c54c7edeab7fde4da68e59acd319ab24af242c3f"
-    digest: "sha256:8d7b41c4ca45860254b3c19e20210462ef89479bb6331d6760c4e609d651b29c"
+    tag: "1755531540-60ee83e"
+    digest: "sha256:5bdca3c2dec2c79f58d45a7a560bf1098c2126350c901379fe850b7f78d3d757"
     useDigest: true
     pullPolicy: "Always"
   # -- The priority class to use for the nodeinit pod.
@@ -3160,9 +3199,9 @@ preflight:
       # @schema
       override: ~
       repository: "quay.io/cilium/cilium-envoy"
-      tag: "v1.35.0-1754542821-43b62ac18029bf5e22cbcc9e7141ee55eb09555d"
+      tag: "v1.35.3-1759553787-f16dc8e69dee56f4e376afef9676c7b9d659ac37"
       pullPolicy: "Always"
-      digest: "sha256:2173f013b41e71cf8d65503cc9710c106746efbd93ae0ef3f46ee65de13b19f6"
+      digest: "sha256:946dcd9e525b644f13a7158c3bafca7d9e901209ceb2833934e73311fab84c76"
       useDigest: true
   # -- The priority class to use for the preflight pod.
   priorityClassName: ""
@@ -3287,23 +3326,50 @@ clustermesh:
     # This is used in the case cluster addresses are not provided
     # and IPs are used.
     domain: mesh.cilium.io
-    # -- List of clusters to be peered in the mesh.
+    # -- Clusters to be peered in the mesh.
+    # @schema
+    # type: [object, array]
+    # @schema
     clusters: []
+    # You can use a dict of clusters (recommended):
     # clusters:
-    # # -- Name of the cluster
+    #   # -- Name of the cluster
+    #   cluster1:
+    #     # -- Whether to enable this cluster in the mesh. Optional, defaults to true.
+    #     enabled: true
+    #     # -- Address of the cluster, use this if you created DNS records for
+    #     # the cluster Clustermesh API server.
+    #     address: cluster1.mesh.cilium.io
+    #     # -- Port of the cluster Clustermesh API server.
+    #     port: 2379
+    #     # -- IPs of the cluster Clustermesh API server, use multiple ones when
+    #     # you have multiple IPs to access the Clustermesh API server.
+    #     ips:
+    #     - 172.18.255.201
+    #     # -- base64 encoded PEM values for the cluster client certificate, private key and certificate authority.
+    #     # These fields can (and should) be omitted in case the CA is shared across clusters. In that case, the
+    #     # "remote" private key and certificate available in the local cluster are automatically used instead.
+    #     tls:
+    #       cert: ""
+    #       key: ""
+    #       caCert: ""
+    #
+    # Or alternatively you can use a list of clusters:
+    # clusters:
+    #   # -- Name of the cluster
     # - name: cluster1
-    # # -- Address of the cluster, use this if you created DNS records for
-    # # the cluster Clustermesh API server.
+    #   # -- Address of the cluster, use this if you created DNS records for
+    #   # the cluster Clustermesh API server.
     #   address: cluster1.mesh.cilium.io
-    # # -- Port of the cluster Clustermesh API server.
+    #   # -- Port of the cluster Clustermesh API server.
     #   port: 2379
-    # # -- IPs of the cluster Clustermesh API server, use multiple ones when
-    # # you have multiple IPs to access the Clustermesh API server.
+    #   # -- IPs of the cluster Clustermesh API server, use multiple ones when
+    #   # you have multiple IPs to access the Clustermesh API server.
     #   ips:
     #   - 172.18.255.201
-    # # -- base64 encoded PEM values for the cluster client certificate, private key and certificate authority.
-    # # These fields can (and should) be omitted in case the CA is shared across clusters. In that case, the
-    # # "remote" private key and certificate available in the local cluster are automatically used instead.
+    #   # -- base64 encoded PEM values for the cluster client certificate, private key and certificate authority.
+    #   # These fields can (and should) be omitted in case the CA is shared across clusters. In that case, the
+    #   # "remote" private key and certificate available in the local cluster are automatically used instead.
     #   tls:
     #     cert: ""
     #     key: ""
@@ -3456,14 +3522,6 @@ clustermesh:
       # -- The type of service used for apiserver access.
       type: NodePort
       # -- Optional port to use as the node port for apiserver access.
-      #
-      # WARNING: make sure to configure a different NodePort in each cluster if
-      # kube-proxy replacement is enabled, as Cilium is currently affected by a known
-      # bug (#24692) when NodePorts are handled by the KPR implementation. If a service
-      # with the same NodePort exists both in the local and the remote cluster, all
-      # traffic originating from inside the cluster and targeting the corresponding
-      # NodePort will be redirected to a local backend, regardless of whether the
-      # destination node belongs to the local or the remote cluster.
       nodePort: 32379
       # -- Annotations for the clustermesh-apiserver service.
       # Example annotations to configure an internal load balancer on different cloud providers:
@@ -3894,7 +3952,7 @@ authentication:
           override: ~
           repository: "docker.io/library/busybox"
           tag: "1.37.0"
-          digest: "sha256:f9a104fddb33220ec80fc45a4e606c74aadf1ef7a3832eb0b05be9e90cd61f5f"
+          digest: "sha256:d82f458899c9696cb26a7c02d5568f81c8c8223f8661bb2a7988b269c8b9051e"
           useDigest: true
           pullPolicy: "Always"
         # SPIRE agent configuration

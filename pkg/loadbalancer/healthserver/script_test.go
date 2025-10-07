@@ -28,6 +28,7 @@ import (
 	daemonk8s "github.com/cilium/cilium/daemon/k8s"
 	cmtypes "github.com/cilium/cilium/pkg/clustermesh/types"
 	"github.com/cilium/cilium/pkg/datapath/tables"
+	envoyCfg "github.com/cilium/cilium/pkg/envoy/config"
 	"github.com/cilium/cilium/pkg/hive"
 	k8sClient "github.com/cilium/cilium/pkg/k8s/client/testutils"
 	"github.com/cilium/cilium/pkg/k8s/testutils"
@@ -75,6 +76,7 @@ func TestScript(t *testing.T) {
 			h := hive.New(
 				k8sClient.FakeClientCell(),
 				daemonk8s.ResourcesCell,
+				cell.Config(envoyCfg.SecretSyncConfig{}),
 				daemonk8s.TablesCell,
 				metrics.Cell,
 
@@ -82,8 +84,9 @@ func TestScript(t *testing.T) {
 
 				cell.Config(loadbalancer.TestConfig{}),
 				maglev.Cell,
-				node.LocalNodeStoreCell,
+				node.LocalNodeStoreTestCell,
 				cell.Provide(
+					func() cmtypes.ClusterInfo { return cmtypes.ClusterInfo{} },
 					func(cfg loadbalancer.TestConfig) *loadbalancer.TestConfig { return &cfg },
 					tables.NewNodeAddressTable,
 					statedb.RWTable[tables.NodeAddress].ToTable,
@@ -92,19 +95,15 @@ func TestScript(t *testing.T) {
 						return &option.DaemonConfig{
 							EnableIPv4:                      true,
 							EnableIPv6:                      true,
-							EnableInternalTrafficPolicy:     true,
 							EnableHealthCheckLoadBalancerIP: true,
 						}
 					},
 					func() kpr.KPRConfig {
 						return kpr.KPRConfig{
-							KubeProxyReplacement: option.KubeProxyReplacementTrue,
-							EnableNodePort:       true,
+							KubeProxyReplacement: true,
 						}
 					},
 				),
-
-				cell.Invoke(statedb.RegisterTable[tables.NodeAddress]),
 			)
 
 			flags := pflag.NewFlagSet("", pflag.ContinueOnError)

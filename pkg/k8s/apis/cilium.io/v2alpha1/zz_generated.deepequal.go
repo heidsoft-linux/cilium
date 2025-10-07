@@ -1578,6 +1578,10 @@ func (in *CoreCiliumEndpoint) DeepEqual(other *CoreCiliumEndpoint) bool {
 		}
 	}
 
+	if in.ServiceAccount != other.ServiceAccount {
+		return false
+	}
+
 	return true
 }
 
@@ -1626,6 +1630,22 @@ func (in *IPPoolSpec) DeepEqual(other *IPPoolSpec) bool {
 		return false
 	} else if in.IPv6 != nil {
 		if !in.IPv6.DeepEqual(other.IPv6) {
+			return false
+		}
+	}
+
+	if (in.PodSelector == nil) != (other.PodSelector == nil) {
+		return false
+	} else if in.PodSelector != nil {
+		if !in.PodSelector.DeepEqual(other.PodSelector) {
+			return false
+		}
+	}
+
+	if (in.NamespaceSelector == nil) != (other.NamespaceSelector == nil) {
+		return false
+	} else if in.NamespaceSelector != nil {
+		if !in.NamespaceSelector.DeepEqual(other.NamespaceSelector) {
 			return false
 		}
 	}

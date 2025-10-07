@@ -21,7 +21,6 @@ on:
     branches:
       - main
       - ft/main/**
-      - 'renovate/main-**'
     paths-ignore:
       - 'Documentation/**'
   # Run every 8 hours
@@ -61,7 +60,7 @@ concurrency:
 
 env:
   # renovate: datasource=golang-version depName=go
-  go-version: 1.24.5
+  go-version: 1.25.1
 
 jobs:
   echo-inputs:
@@ -89,7 +88,7 @@ jobs:
     name: Build Ginkgo Runtime
     steps:
       - name: Checkout context ref (trusted)
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           ref: ${{ inputs.context-ref || github.sha }}
           persist-credentials: false
@@ -111,7 +110,7 @@ jobs:
       # Warning: since this is a privileged workflow, subsequent workflow job
       # steps must take care not to execute untrusted code.
       - name: Checkout pull request branch (NOT TRUSTED)
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           ref: ${{ steps.vars.outputs.sha }}
           persist-credentials: false
@@ -121,7 +120,7 @@ jobs:
 
       # Load Ginkgo build from GitHub
       - name: Load ginkgo runtime from GH cache
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         id: cache
         with:
           path: /tmp/.ginkgo-build/
@@ -129,10 +128,10 @@ jobs:
 
       - name: Install Go
         if: ${{ steps.cache.outputs.cache-hit != 'true' }}
-        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
         with:
           # renovate: datasource=golang-version depName=go
-          go-version: 1.24.5
+          go-version: 1.25.1
 
       - name: Build Ginkgo
         if: ${{ steps.cache.outputs.cache-hit != 'true' }}
@@ -206,6 +205,8 @@ jobs:
           # RuntimeAgentPolicies Tests EntityNone as a deny-all
           - focus: "agent"
             cliFocus: "RuntimeAgent"
+            # TODO: not updated by by renovate, investigate why the tests fail on newer images
+            lvhImage: "6.12-20241218.004849"
 
           ###
           # RuntimeDatapathMonitorTest With Sample Containers checks container ids match monitor output
@@ -216,6 +217,12 @@ jobs:
           # RuntimeDatapathMonitorTest With Sample Containers delivers the same information to multiple monitors
           - focus: "datapath"
             cliFocus: "RuntimeDatapathMonitorTest"
+            # TODO: not updated by by renovate, investigate why the tests fail on newer images
+            lvhImage: "6.12-20241218.004849"
+
+          - focus: "privileged"
+            # renovate: datasource=docker depName=quay.io/lvh-images/kind
+            lvhImage: "6.12-20250807.134150"
 
     timeout-minutes: 50
     steps:
@@ -225,7 +232,7 @@ jobs:
           comment_on_pr: false
 
       - name: Checkout context ref (trusted)
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           ref: ${{ inputs.context-ref || github.sha }}
           persist-credentials: false
@@ -250,7 +257,7 @@ jobs:
       # Warning: since this is a privileged workflow, subsequent workflow job
       # steps must take care not to execute untrusted code.
       - name: Checkout pull request branch (NOT TRUSTED)
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           ref: ${{ steps.vars.outputs.sha }}
           persist-credentials: false
@@ -260,18 +267,17 @@ jobs:
         with:
           test-name: runtime-tests
           install-dependencies: true
-          # renovate: datasource=docker depName=quay.io/lvh-images/kind
-          image-version: "6.12-20241218.004849"
+          image-version: "${{ matrix.lvhImage }}"
           host-mount: ./
           images-folder-parent: "/tmp"
           cpu: 4
           # renovate: datasource=github-tags depName=cilium/little-vm-helper
           lvh-version: "v0.0.26"
-          mem: 12G
+          mem: 14G
 
       # Load Ginkgo build from GitHub
       - name: Load ${{ matrix.focus }} Ginkgo build from GitHub
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         id: cache
         with:
           path: /tmp/.ginkgo-build/
@@ -279,11 +285,11 @@ jobs:
 
       - name: Install Go
         if: ${{ steps.cache.outputs.cache-hit != 'true' }}
-        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
         with:
           cache: false
           # renovate: datasource=golang-version depName=go
-          go-version: 1.24.5
+          go-version: 1.25.1
 
       - name: Build Ginkgo
         if: ${{ steps.cache.outputs.cache-hit != 'true' }}
@@ -320,7 +326,7 @@ jobs:
       # Load Golang cache build from GitHub
       - name: Load Golang cache build from GitHub
         if: ${{ matrix.focus == 'privileged' }}
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         id: go-cache
         with:
           path: /tmp/.cache/go
@@ -431,8 +437,7 @@ jobs:
           provision: 'false'
           cmd: |
             cd /host
-            # TODO: re-enable go caches (GOCACHE="/go-caches/go-build" GOMODCACHE="/go-caches/pkg") once images with larger disk size from https://github.com/cilium/little-vm-helper-images/pull/960 are in use
-            make SKIP_COVERAGE=1 LOG_CODEOWNERS=1 JUNIT_PATH="test/${{ env.job_name }}.xml" tests-privileged-only GO=go${{ env.go-version }}
+            make GOCACHE="/go-caches/go-build" GOMODCACHE="/go-caches/pkg" SKIP_COVERAGE=1 LOG_CODEOWNERS=1 JUNIT_PATH="test/${{ env.job_name }}.xml" tests-privileged-only GO=go${{ env.go-version }}
 
       - name: Copy Go cache to host
         id: copy-go-cache
@@ -540,7 +545,7 @@ jobs:
     needs: setup-and-test
     steps:
       - name: Checkout context ref (trusted)
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           ref: ${{ inputs.context-ref || github.sha }}
           persist-credentials: false
@@ -556,6 +561,7 @@ jobs:
           name: features-tested
           pattern: features-tested-*
           token: ${{ secrets.GITHUB_TOKEN }}
+          separate-directories: true
 
   commit-status-final:
     if: ${{ always() }}

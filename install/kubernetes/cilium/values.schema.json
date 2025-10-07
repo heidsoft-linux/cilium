@@ -463,6 +463,14 @@
         "enabled": {
           "type": "boolean"
         },
+        "legacyOriginAttribute": {
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
         "routerIDAllocation": {
           "properties": {
             "ipPool": {
@@ -658,6 +666,12 @@
           "type": [
             "null",
             "integer"
+          ]
+        },
+        "policyMapPressureMetricsThreshold": {
+          "type": [
+            "null",
+            "number"
           ]
         },
         "policyStatsMapMax": {
@@ -1448,7 +1462,10 @@
           "properties": {
             "clusters": {
               "items": {},
-              "type": "array"
+              "type": [
+                "object",
+                "array"
+              ]
             },
             "domain": {
               "type": "string"
@@ -1815,6 +1832,9 @@
       "type": "boolean"
     },
     "enableMasqueradeRouteSource": {
+      "type": "boolean"
+    },
+    "enableNoServiceEndpointsRoutable": {
       "type": "boolean"
     },
     "enableNonDefaultDenyPolicies": {
@@ -3168,8 +3188,14 @@
                 "address": {
                   "type": "string"
                 },
+                "blockProfileRate": {
+                  "type": "integer"
+                },
                 "enabled": {
                   "type": "boolean"
+                },
+                "mutexProfileFraction": {
+                  "type": "integer"
                 },
                 "port": {
                   "type": "integer"
@@ -4183,6 +4209,12 @@
     "kubeConfigPath": {
       "type": "string"
     },
+    "kubeProxyReplacement": {
+      "type": [
+        "string",
+        "boolean"
+      ]
+    },
     "kubeProxyReplacementHealthzBindAddr": {
       "type": "string"
     },
@@ -4339,9 +4371,6 @@
           "type": "boolean"
         },
         "enableHealthCheckLoadBalancerIP": {
-          "type": "boolean"
-        },
-        "enabled": {
           "type": "boolean"
         }
       },
@@ -4756,8 +4785,14 @@
             "address": {
               "type": "string"
             },
+            "blockProfileRate": {
+              "type": "integer"
+            },
             "enabled": {
               "type": "boolean"
+            },
+            "mutexProfileFraction": {
+              "type": "integer"
             },
             "port": {
               "type": "integer"
@@ -4899,6 +4934,16 @@
                     "type": "string"
                   }
                 }
+              },
+              {
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "operator": {
+                    "type": "string"
+                  }
+                }
               }
             ]
           },
@@ -4918,6 +4963,12 @@
             },
             "restart": {
               "type": "boolean"
+            },
+            "selector": {
+              "type": [
+                "null",
+                "string"
+              ]
             }
           },
           "type": "object"
@@ -4992,6 +5043,9 @@
         "array"
       ]
     },
+    "policyDenyResponse": {
+      "type": "string"
+    },
     "policyEnforcementMode": {
       "type": "string"
     },
@@ -5000,8 +5054,14 @@
         "address": {
           "type": "string"
         },
+        "blockProfileRate": {
+          "type": "integer"
+        },
         "enabled": {
           "type": "boolean"
+        },
+        "mutexProfileFraction": {
+          "type": "integer"
         },
         "port": {
           "type": "integer"
@@ -5755,9 +5815,6 @@
         }
       },
       "type": "object"
-    },
-    "svcSourceRangeCheck": {
-      "type": "boolean"
     },
     "synchronizeK8sNodes": {
       "type": "boolean"

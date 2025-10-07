@@ -9,7 +9,6 @@
 #define ENABLE_IPV4
 #define ENABLE_NODEPORT
 #define ENABLE_NODEPORT_ACCELERATION
-#define ENABLE_SESSION_AFFINITY
 #define TEST_LB_MAGLEV_MAP_MAX_ENTRIES 65536
 #define TEST_CONDITIONAL_PREALLOC      0
 #define TEST_REVNAT		       1
@@ -51,6 +50,26 @@ static volatile const __u8 base_backend_mac[ETH_ALEN] = {
 #define LB_MAGLEV_LUT_SIZE 20
 
 /* Define a mock maglev map that would be used by the LB code */
+struct lb6_maglev_map_inner {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(key_size, sizeof(__u32));
+	__uint(value_size, sizeof(__u32) * LB_MAGLEV_LUT_SIZE);
+	__uint(max_entries, 1);
+} test_lb6_maglev_map_inner __section_maps_btf;
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH_OF_MAPS);
+	__type(key, __u32);
+	__type(value, __u32);
+	__uint(pinning, LIBBPF_PIN_BY_NAME);
+	__uint(max_entries, TEST_LB_MAGLEV_MAP_MAX_ENTRIES);
+	__uint(map_flags, TEST_CONDITIONAL_PREALLOC);
+	/* Maglev inner map definition */
+	__array(values, struct lb6_maglev_map_inner);
+} cilium_lb6_maglev __section_maps_btf = {
+	.values = {[TEST_REVNAT] = &test_lb6_maglev_map_inner, },
+};
+
 struct lb4_maglev_map_inner {
 	__uint(type, BPF_MAP_TYPE_ARRAY);
 	__uint(key_size, sizeof(__u32));
@@ -70,6 +89,8 @@ struct {
 } cilium_lb4_maglev __section_maps_btf = {
 	.values = {[TEST_REVNAT] = &test_lb4_maglev_map_inner, },
 };
+
+#define OVERWRITE_MAGLEV_MAP_FROM_TEST 1
 
 static __always_inline void get_backend_mac(__u8 *dst, __u32 backend_id)
 {
@@ -100,19 +121,8 @@ long mock_fib_lookup(__maybe_unused void *ctx, struct bpf_fib_lookup *params,
 	return 0;
 }
 
-#include "bpf_xdp.c"
+#include "lib/bpf_xdp.h"
 #include "lib/lb.h"
-
-struct {
-	__uint(type, BPF_MAP_TYPE_PROG_ARRAY);
-	__uint(key_size, sizeof(__u32));
-	__uint(max_entries, 1);
-	__array(values, int());
-} entry_call_map __section(".maps") = {
-.values = {
-  [0] = &cil_xdp_entry,
-},
-};
 
 static __always_inline int
 generate_packet(struct __ctx_buff *ctx, int client_id, __u16 src_port)
@@ -260,10 +270,8 @@ SETUP("xdp", "session_affinity_maglev_client_1_port_1")
 int setup_1_1(struct __ctx_buff *ctx)
 {
 	setup_test();
-	/* Jump into the entrypoint */
-	tail_call_static(ctx, entry_call_map, 0);
-	/* Fail if we didn't jump */
-	return TEST_ERROR;
+
+	return xdp_receive_packet(ctx);
 }
 
 CHECK("xdp", "session_affinity_maglev_client_1_port_1")
@@ -285,10 +293,8 @@ SETUP("xdp", "session_affinity_maglev_client_1_port_2")
 int setup_1_2(struct __ctx_buff *ctx)
 {
 	setup_test();
-	/* Jump into the entrypoint */
-	tail_call_static(ctx, entry_call_map, 0);
-	/* Fail if we didn't jump */
-	return TEST_ERROR;
+
+	return xdp_receive_packet(ctx);
 }
 
 CHECK("xdp", "session_affinity_maglev_client_1_port_2")
@@ -310,10 +316,8 @@ SETUP("xdp", "session_affinity_maglev_client_1_port_3")
 int setup_1_3(struct __ctx_buff *ctx)
 {
 	setup_test();
-	/* Jump into the entrypoint */
-	tail_call_static(ctx, entry_call_map, 0);
-	/* Fail if we didn't jump */
-	return TEST_ERROR;
+
+	return xdp_receive_packet(ctx);
 }
 
 CHECK("xdp", "session_affinity_maglev_client_1_port_3")
@@ -335,10 +339,8 @@ SETUP("xdp", "session_affinity_maglev_client_2_port_1")
 int setup_2_1(struct __ctx_buff *ctx)
 {
 	setup_test();
-	/* Jump into the entrypoint */
-	tail_call_static(ctx, entry_call_map, 0);
-	/* Fail if we didn't jump */
-	return TEST_ERROR;
+
+	return xdp_receive_packet(ctx);
 }
 
 CHECK("xdp", "session_affinity_maglev_client_2_port_1")
@@ -360,10 +362,8 @@ SETUP("xdp", "session_affinity_maglev_client_2_port_2")
 int setup_2_2(struct __ctx_buff *ctx)
 {
 	setup_test();
-	/* Jump into the entrypoint */
-	tail_call_static(ctx, entry_call_map, 0);
-	/* Fail if we didn't jump */
-	return TEST_ERROR;
+
+	return xdp_receive_packet(ctx);
 }
 
 CHECK("xdp", "session_affinity_maglev_client_2_port_2")
@@ -385,10 +385,8 @@ SETUP("xdp", "session_affinity_maglev_client_2_port_3")
 int setup_2_3(struct __ctx_buff *ctx)
 {
 	setup_test();
-	/* Jump into the entrypoint */
-	tail_call_static(ctx, entry_call_map, 0);
-	/* Fail if we didn't jump */
-	return TEST_ERROR;
+
+	return xdp_receive_packet(ctx);
 }
 
 CHECK("xdp", "session_affinity_maglev_client_2_port_3")

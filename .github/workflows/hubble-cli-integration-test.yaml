@@ -21,7 +21,6 @@ on:
     branches:
     - main
     - ft/main/**
-    - 'renovate/main-**'
     paths-ignore:
     - 'Documentation/**'
 
@@ -52,6 +51,7 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' }}
     name: Echo Workflow Dispatch Inputs
     runs-on: ubuntu-24.04
+    permissions: {}
     steps:
       - name: Echo Workflow Dispatch Inputs
         run: |
@@ -60,6 +60,8 @@ jobs:
   commit-status-start:
     name: Commit Status Start
     runs-on: ubuntu-24.04
+    permissions:
+      statuses: write
     steps:
       - name: Set initial commit status
         uses: myrotvorets/set-commit-status-action@3730c0a348a2ace3c110851bed53331bc6406e9f # v2.0.1
@@ -68,6 +70,8 @@ jobs:
 
   integration-test:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     env:
       job_name: "Integration Test"
     name: Hubble CLI Integration Test
@@ -79,7 +83,7 @@ jobs:
           comment_on_pr: false
 
       - name: Checkout context ref (trusted)
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           ref: ${{ inputs.context-ref || github.sha }}
           persist-credentials: false
@@ -107,7 +111,7 @@ jobs:
       # Warning: since this is a privileged workflow, subsequent workflow job
       # steps must take care not to execute untrusted code.
       - name: Checkout pull request branch (NOT TRUSTED)
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           ref: ${{ steps.vars.outputs.sha }}
           persist-credentials: false
@@ -119,7 +123,7 @@ jobs:
       # Build hubble CLI before setting up the cluster and waiting on images to
       # save time on failures.
       - name: Setup go
-        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
         with:
           go-version-file: 'go.mod'
 
@@ -147,7 +151,7 @@ jobs:
           done
 
       - name: Install Cilium CLI
-        uses: cilium/cilium-cli@746083db48591ffbebd37743873a91a13a6b04b8 # v0.18.6
+        uses: cilium/cilium-cli@024e340cca1465e2a6336521f12370c7ca58c59a # v0.18.7
         with:
           skip-build: ${{ env.CILIUM_CLI_SKIP_BUILD }}
           image-repo: ${{ env.CILIUM_CLI_IMAGE_REPO }}
@@ -207,6 +211,10 @@ jobs:
     if: ${{ always() }}
     needs: integration-test
     uses: ./.github/workflows/common-post-jobs.yaml
+    permissions:
+      contents: read
+      actions: read
+      statuses: write
     secrets: inherit
     with:
       context-ref: ${{ inputs.context-ref || github.sha }}

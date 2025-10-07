@@ -275,12 +275,9 @@ func (d *statusCollector) getCNIChainingStatus() *models.CNIChainingStatus {
 }
 
 func (d *statusCollector) getKubeProxyReplacementStatus(ctx context.Context) *models.KubeProxyReplacement {
-	var mode string
-	switch d.statusParams.KPRConfig.KubeProxyReplacement {
-	case option.KubeProxyReplacementTrue:
+	mode := models.KubeProxyReplacementModeFalse
+	if d.statusParams.KPRConfig.KubeProxyReplacement {
 		mode = models.KubeProxyReplacementModeTrue
-	case option.KubeProxyReplacementFalse:
-		mode = models.KubeProxyReplacementModeFalse
 	}
 
 	devices, _ := datapathTables.SelectedDevices(d.statusParams.Devices, d.statusParams.DB.ReadTxn())
@@ -306,7 +303,7 @@ func (d *statusCollector) getKubeProxyReplacementStatus(ctx context.Context) *mo
 		Nat46X64:              &models.KubeProxyReplacementFeaturesNat46X64{},
 		BpfSocketLBHostnsOnly: d.statusParams.DaemonConfig.BPFSocketLBHostnsOnly,
 	}
-	if d.statusParams.KPRConfig.EnableNodePort {
+	if d.statusParams.KPRConfig.KubeProxyReplacement {
 		features.NodePort.Enabled = true
 		features.NodePort.Mode = strings.ToUpper(d.statusParams.LBConfig.LBMode)
 		switch d.statusParams.LBConfig.DSRDispatch {
@@ -337,19 +334,15 @@ func (d *statusCollector) getKubeProxyReplacementStatus(ctx context.Context) *mo
 		features.NodePort.PortMin = int64(d.statusParams.LBConfig.NodePortMin)
 		features.NodePort.PortMax = int64(d.statusParams.LBConfig.NodePortMax)
 	}
-	if d.statusParams.KPRConfig.EnableHostPort {
+	if d.statusParams.KPRConfig.KubeProxyReplacement {
 		features.HostPort.Enabled = true
-	}
-	if d.statusParams.KPRConfig.EnableExternalIPs {
 		features.ExternalIPs.Enabled = true
 	}
 	if d.statusParams.KPRConfig.EnableSocketLB {
 		features.SocketLB.Enabled = true
 		features.SocketLBTracing.Enabled = true
 	}
-	if d.statusParams.KPRConfig.EnableSessionAffinity {
-		features.SessionAffinity.Enabled = true
-	}
+	features.SessionAffinity.Enabled = true
 	if d.statusParams.DaemonConfig.NodePortNat46X64 || d.statusParams.DaemonConfig.EnableNat46X64Gateway {
 		features.Nat46X64.Enabled = true
 		gw := &models.KubeProxyReplacementFeaturesNat46X64Gateway{
@@ -366,7 +359,7 @@ func (d *statusCollector) getKubeProxyReplacementStatus(ctx context.Context) *mo
 		}
 		features.Nat46X64.Service = svc
 	}
-	if d.statusParams.KPRConfig.EnableNodePort {
+	if d.statusParams.KPRConfig.KubeProxyReplacement {
 		if d.statusParams.LBConfig.AlgorithmAnnotation {
 			features.Annotations = append(features.Annotations, annotation.ServiceLoadBalancingAlgorithm)
 		}
@@ -377,9 +370,7 @@ func (d *statusCollector) getKubeProxyReplacementStatus(ctx context.Context) *mo
 		features.Annotations = append(features.Annotations, annotation.ServiceNodeSelectorExposure)
 		features.Annotations = append(features.Annotations, annotation.ServiceTypeExposure)
 		features.Annotations = append(features.Annotations, annotation.ServiceProxyDelegation)
-		if d.statusParams.KPRConfig.EnableSVCSourceRangeCheck {
-			features.Annotations = append(features.Annotations, annotation.ServiceSourceRangesPolicy)
-		}
+		features.Annotations = append(features.Annotations, annotation.ServiceSourceRangesPolicy)
 		sort.Strings(features.Annotations)
 	}
 
@@ -902,7 +893,7 @@ func (d *statusCollector) getProbes() []Probe {
 			Name: "encryption",
 			Probe: func(ctx context.Context) (any, error) {
 				switch {
-				case d.statusParams.DaemonConfig.EnableIPSec:
+				case d.statusParams.IPsecConfig.Enabled():
 					return &models.EncryptionStatus{
 						Mode: models.EncryptionStatusModeIPsec,
 					}, nil

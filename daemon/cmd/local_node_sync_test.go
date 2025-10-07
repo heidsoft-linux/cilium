@@ -17,6 +17,7 @@ import (
 	k8sRuntime "k8s.io/apimachinery/pkg/runtime"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 
+	fakeTypes "github.com/cilium/cilium/pkg/datapath/fake/types"
 	v2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	"github.com/cilium/cilium/pkg/k8s/resource"
 	slim_corev1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/core/v1"
@@ -107,7 +108,9 @@ func TestLocalNodeSync(t *testing.T) {
 		local = node.LocalNode{Node: types.Node{
 			Labels:      map[string]string{"ex": "label"},
 			Annotations: map[string]string{"ex": "annot"},
-		}}
+		},
+			Local: &node.LocalNodeInfo{},
+		}
 		fln  = newFakeLocalNode()
 		sync = newLocalNodeSynchronizer(localNodeSynchronizerParams{
 			Logger: hivetest.Logger(t),
@@ -124,42 +127,43 @@ func TestLocalNodeSync(t *testing.T) {
 					},
 				},
 			},
+			IPsecConfig: fakeTypes.IPsecConfig{},
 		})
 	)
 
-	require.NoError(t, sync.InitLocalNode(context.TODO(), &local))
+	require.NoError(t, sync.InitLocalNode(t.Context(), &local))
 	require.EqualValues(t, 1, fln.done)
 	require.Equal(t, "foo", local.Name)
 	require.Equal(t, "10.0.0.1", local.GetNodeInternalIPv4().String())
 	require.Equal(t, "fc00::11", local.GetNodeInternalIPv6().String())
 	require.Equal(t, map[string]string{"ex": "label", "foo": "bar"}, local.Labels)
 	require.Equal(t, map[string]string{"ex": "annot", "cilium.io/baz": "qux"}, local.Annotations)
-	require.Equal(t, k8stypes.UID("uid1"), local.UID)
-	require.Equal(t, "provider://foobar", local.ProviderID)
+	require.Equal(t, k8stypes.UID("uid1"), local.Local.UID)
+	require.Equal(t, "provider://foobar", local.Local.ProviderID)
 
 	store := node.NewTestLocalNodeStore(local)
-	updates := stream.ToChannel(context.Background(), store.Observable, stream.WithBufferSize(4))
 
-	sync.SyncLocalNode(context.Background(), store)
+	sync.SyncLocalNode(t.Context(), store)
+
+	// Assert that SyncLocalNode processed all the events emitted by [fln]
 	require.EqualValues(t, 5, fln.done)
 
+	// The observed update at this point will be the final state.
+	updates := stream.ToChannel(t.Context(), store)
 	update := <-updates
-	require.Equal(t, map[string]string{"ex": "label", "foo": "bar"}, update.Labels)
-	require.Equal(t, map[string]string{"ex": "annot", "cilium.io/baz": "qux"}, update.Annotations)
-	update = <-updates
-	require.Equal(t, map[string]string{"ex": "label", "foo": "bar", "qux": "baz"}, update.Labels)
-	require.Equal(t, map[string]string{"ex": "annot", "cilium.io/baz": "qux", "cilium.io/bar": "foo"}, update.Annotations)
-	update = <-updates
 	require.Equal(t, map[string]string{"ex": "label", "qux": "baz"}, update.Labels)
 	require.Equal(t, map[string]string{"ex": "annot", "cilium.io/bar": "foo"}, update.Annotations)
-	update = <-updates
-	require.Equal(t, k8stypes.UID("uid2"), update.UID)
-	require.Equal(t, "provider://foobaz", update.ProviderID)
+	require.Equal(t, k8stypes.UID("uid2"), update.Local.UID)
+	require.Equal(t, "provider://foobaz", update.Local.ProviderID)
+
+	n, err := store.Get(t.Context())
+	require.NoError(t, err)
+	require.True(t, n.DeepEqual(&update))
 }
 
 func TestInitLocalNode_initFromK8s(t *testing.T) {
-	lni := &localNodeSynchronizer{
-		localNodeSynchronizerParams: localNodeSynchronizerParams{
+	lni := newLocalNodeSynchronizer(
+		localNodeSynchronizerParams{
 			Logger: hivetest.Logger(t),
 			Config: &option.DaemonConfig{
 				IPv4NodeAddr:                 "auto",
@@ -187,6 +191,7 @@ func TestInitLocalNode_initFromK8s(t *testing.T) {
 					},
 				},
 			},
+			IPsecConfig: fakeTypes.IPsecConfig{},
 			K8sCiliumLocalNode: &mockResource[*v2.CiliumNode]{
 				items: []resource.Event[*v2.CiliumNode]{
 					{
@@ -221,11 +226,12 @@ func TestInitLocalNode_initFromK8s(t *testing.T) {
 				},
 			},
 		},
-	}
+	)
 	n := &node.LocalNode{
 		Node: types.Node{
 			Labels: map[string]string{},
 		},
+		Local: &node.LocalNodeInfo{},
 	}
 	err := lni.InitLocalNode(context.Background(), n)
 	assert.NoError(t, err)
@@ -312,6 +318,7 @@ func testNodeDeletion(t *testing.T, nodeEvent resource.Event[*slim_corev1.Node])
 			IPv4NodeAddr: "1.2.3.4",
 			IPv6NodeAddr: "fd00::1",
 		},
+		IPsecConfig:  fakeTypes.IPsecConfig{},
 		K8sLocalNode: fakeNode,
 		K8sCiliumLocalNode: &mockResource[*v2.CiliumNode]{
 			items: []resource.Event[*v2.CiliumNode]{
@@ -321,18 +328,18 @@ func testNodeDeletion(t *testing.T, nodeEvent resource.Event[*slim_corev1.Node])
 	})
 
 	// Initialize local node
-	local := node.LocalNode{Node: types.Node{Name: "test-node"}}
+	local := node.LocalNode{Node: types.Node{Name: "test-node"}, Local: &node.LocalNodeInfo{}}
 	store := node.NewTestLocalNodeStore(local)
 
 	// Start observing updates
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	updates := stream.ToChannel(ctx, store.Observable, stream.WithBufferSize(3))
+	updates := stream.ToChannel(ctx, store, stream.WithBufferSize(3))
 
 	// Verify initial state
 	initialNode, _ := store.Get(context.Background())
-	assert.False(t, initialNode.IsBeingDeleted)
+	assert.False(t, initialNode.Local.IsBeingDeleted)
 
 	// Start the sync
 	go sync.SyncLocalNode(ctx, store)
@@ -342,7 +349,7 @@ func testNodeDeletion(t *testing.T, nodeEvent resource.Event[*slim_corev1.Node])
 	for !foundDeleted {
 		select {
 		case updatedNode := <-updates:
-			if updatedNode.IsBeingDeleted {
+			if updatedNode.Local.IsBeingDeleted {
 				foundDeleted = true
 			}
 		case <-ctx.Done():

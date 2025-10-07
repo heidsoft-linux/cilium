@@ -40,25 +40,32 @@
  */
 #define ASSERT_CTX_BUF_OFF(NAME, FIRST_LAYER, CTX, OFF, BUF_NAME, LEN)		\
 	do {									\
-		void *__data = (void *)(long)(CTX)->data;			\
-		void *__data_end = (void *)(long)(CTX)->data_end;		\
-		__data += OFF;							\
-		if (__data + (LEN) > __data_end) {				\
-			test_log("CTX size - offset < LEN " __FILE__ ":"	\
-				 LINE_STRING);					\
-			test_fail_now();					\
+		void *__DATA = (void *)(long)(CTX)->data;			\
+		void *__DATA_END = (void *)(long)(CTX)->data_end;		\
+		__DATA += OFF;							\
+		bool ok = true;							\
+		__u16 _len = LEN;						\
+										\
+		if (__DATA + (LEN) > __DATA_END) {				\
+			ok = false;						\
+			_len = (__u16)(__DATA_END - __DATA);			\
+			test_log("CTX len (%d) - offset (%d) < LEN (%d)",	\
+				 _len + OFF, OFF, LEN);				\
 		}								\
 		if (sizeof(BUF(BUF_NAME)) < (LEN)) {				\
-			test_log("BUF size < LEN " __FILE__ ":" LINE_STRING);	\
-			test_fail_now();					\
+			ok = false;						\
+			test_log("Buffer '" #BUF_NAME "' of len (%d) < LEN"	\
+				 " (%d)", sizeof(BUF(BUF_NAME)), LEN);		\
 		}								\
-		if (memcmp(__data, &BUF(BUF_NAME), LEN) != 0) {			\
+		if (ok && memcmp(__DATA, &BUF(BUF_NAME), LEN) != 0) {		\
+			ok = false;						\
 			test_log("CTX and buffer '" #BUF_NAME			\
-				 "' mismatch " __FILE__ ":"			\
-				LINE_STRING);					\
+				 "' content mismatch ");			\
+		}								\
+		if (!ok) {							\
 			hexdump_len_off(__FILE__ ":" LINE_STRING " assert '"	\
 					NAME "' FAILED! Got (ctx)",		\
-					FIRST_LAYER, CTX, LEN, OFF);		\
+					FIRST_LAYER, CTX, _len, OFF);		\
 			scapy_hexdump(__FILE__ ":" LINE_STRING " assert '"	\
 				      NAME "' FAILED! Expected (buf)",		\
 				      FIRST_LAYER, &BUF(BUF_NAME)[0],		\

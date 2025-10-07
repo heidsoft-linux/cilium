@@ -4,7 +4,6 @@
 package cmd
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -14,15 +13,10 @@ import (
 
 	"github.com/vishvananda/netlink"
 
-	"github.com/cilium/cilium/pkg/cidr"
-	"github.com/cilium/cilium/pkg/datapath/linux/linux_defaults"
-	"github.com/cilium/cilium/pkg/datapath/linux/route"
 	"github.com/cilium/cilium/pkg/datapath/linux/safenetlink"
-	"github.com/cilium/cilium/pkg/defaults"
 	"github.com/cilium/cilium/pkg/endpointmanager"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/maps/ctmap"
-	"github.com/cilium/cilium/pkg/maps/encrypt"
 	"github.com/cilium/cilium/pkg/maps/fragmap"
 	ipcachemap "github.com/cilium/cilium/pkg/maps/ipcache"
 	"github.com/cilium/cilium/pkg/maps/lxcmap"
@@ -31,9 +25,6 @@ import (
 	"github.com/cilium/cilium/pkg/maps/neighborsmap"
 	"github.com/cilium/cilium/pkg/maps/policymap"
 	"github.com/cilium/cilium/pkg/maps/tunnel"
-	"github.com/cilium/cilium/pkg/maps/vtep"
-	"github.com/cilium/cilium/pkg/metrics"
-	"github.com/cilium/cilium/pkg/mtu"
 	"github.com/cilium/cilium/pkg/option"
 )
 
@@ -155,7 +146,7 @@ func (d *Daemon) initMaps() error {
 		return nil
 	}
 
-	if err := lxcmap.LXCMap(d.metricsRegistry).OpenOrCreate(); err != nil {
+	if err := lxcmap.LXCMap(d.params.MetricsRegistry).OpenOrCreate(); err != nil {
 		return fmt.Errorf("initializing lxc map: %w", err)
 	}
 
@@ -169,7 +160,7 @@ func (d *Daemon) initMaps() error {
 	// the first time and its bpf programs have been replaced. Existing endpoints
 	// are using a policy map which is potentially out of sync as local identities
 	// are re-allocated on startup.
-	if err := ipcachemap.IPCacheMap(d.metricsRegistry).Recreate(); err != nil {
+	if err := ipcachemap.IPCacheMap(d.params.MetricsRegistry).Recreate(); err != nil {
 		return fmt.Errorf("initializing ipcache map: %w", err)
 	}
 
@@ -184,12 +175,6 @@ func (d *Daemon) initMaps() error {
 		return fmt.Errorf("removing tunnel map: %w", err)
 	}
 
-	if option.Config.EnableVTEP {
-		if err := vtep.VtepMap(d.metricsRegistry).Recreate(); err != nil {
-			return fmt.Errorf("initializing vtep map: %w", err)
-		}
-	}
-
 	for _, m := range ctmap.GlobalMaps(option.Config.EnableIPv4,
 		option.Config.EnableIPv6) {
 		if err := m.Create(); err != nil {
@@ -197,8 +182,8 @@ func (d *Daemon) initMaps() error {
 		}
 	}
 
-	ipv4Nat, ipv6Nat := nat.GlobalMaps(d.metricsRegistry, option.Config.EnableIPv4,
-		option.Config.EnableIPv6, d.kprCfg.EnableNodePort)
+	ipv4Nat, ipv6Nat := nat.GlobalMaps(d.params.MetricsRegistry, option.Config.EnableIPv4,
+		option.Config.EnableIPv6, d.params.KPRConfig.KubeProxyReplacement || option.Config.EnableBPFMasquerade)
 	if ipv4Nat != nil {
 		if err := ipv4Nat.Create(); err != nil {
 			return fmt.Errorf("initializing ipv4nat map: %w", err)
@@ -210,11 +195,13 @@ func (d *Daemon) initMaps() error {
 		}
 	}
 
-	if d.kprCfg.EnableNodePort {
+	if d.params.KPRConfig.KubeProxyReplacement {
 		if err := neighborsmap.InitMaps(option.Config.EnableIPv4,
 			option.Config.EnableIPv6); err != nil {
 			return fmt.Errorf("initializing neighbors map: %w", err)
 		}
+	}
+	if d.params.KPRConfig.KubeProxyReplacement || option.Config.EnableBPFMasquerade {
 		if err := nat.CreateRetriesMaps(option.Config.EnableIPv4,
 			option.Config.EnableIPv6); err != nil {
 			return fmt.Errorf("initializing NAT retries map: %w", err)
@@ -222,147 +209,21 @@ func (d *Daemon) initMaps() error {
 	}
 
 	if option.Config.EnableIPv4FragmentsTracking {
-		if err := fragmap.InitMap4(d.metricsRegistry, option.Config.FragmentsMapEntries); err != nil {
+		if err := fragmap.InitMap4(d.params.MetricsRegistry, option.Config.FragmentsMapEntries); err != nil {
 			return fmt.Errorf("initializing fragments map: %w", err)
 		}
 	}
 
 	if option.Config.EnableIPv6FragmentsTracking {
-		if err := fragmap.InitMap6(d.metricsRegistry, option.Config.FragmentsMapEntries); err != nil {
+		if err := fragmap.InitMap6(d.params.MetricsRegistry, option.Config.FragmentsMapEntries); err != nil {
 			return fmt.Errorf("initializing fragments map: %w", err)
-		}
-	}
-
-	if option.Config.EnableIPSec {
-		if err := encrypt.MapCreate(); err != nil {
-			return fmt.Errorf("initializing IPsec map: %w", err)
 		}
 	}
 
 	if !option.Config.RestoreState {
 		// If we are not restoring state, all endpoints can be
 		// deleted. Entries will be re-populated.
-		lxcmap.LXCMap(d.metricsRegistry).DeleteAll()
-	}
-
-	return nil
-}
-
-func syncVTEP(logger *slog.Logger, registry *metrics.Registry) func(context.Context) error {
-	return func(context.Context) error {
-		if option.Config.EnableVTEP {
-			err := setupVTEPMapping(logger, registry)
-			if err != nil {
-				return err
-			}
-			err = setupRouteToVtepCidr(logger)
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-}
-
-func setupVTEPMapping(logger *slog.Logger, registry *metrics.Registry) error {
-	for i, ep := range option.Config.VtepEndpoints {
-		logger.Debug(
-			"Updating vtep map entry for VTEP",
-			logfields.IPAddr, ep,
-		)
-
-		err := vtep.UpdateVTEPMapping(logger, registry, option.Config.VtepCIDRs[i], ep, option.Config.VtepMACs[i])
-		if err != nil {
-			return fmt.Errorf("Unable to set up VTEP ipcache mappings: %w", err)
-		}
-	}
-	return nil
-}
-
-func setupRouteToVtepCidr(logger *slog.Logger) error {
-	routeCidrs := []*cidr.CIDR{}
-
-	filter := &netlink.Route{
-		Table: linux_defaults.RouteTableVtep,
-	}
-
-	routes, err := safenetlink.RouteListFiltered(netlink.FAMILY_V4, filter, netlink.RT_FILTER_TABLE)
-	if err != nil {
-		return fmt.Errorf("failed to list routes: %w", err)
-	}
-	for _, rt := range routes {
-		rtCIDR, err := cidr.ParseCIDR(rt.Dst.String())
-		if err != nil {
-			return fmt.Errorf("Invalid VTEP Route CIDR: %w", err)
-		}
-		routeCidrs = append(routeCidrs, rtCIDR)
-	}
-
-	addedVtepRoutes, removedVtepRoutes := cidr.DiffCIDRLists(routeCidrs, option.Config.VtepCIDRs)
-	vtepMTU := mtu.EthernetMTU - mtu.TunnelOverheadIPv4
-
-	if option.Config.EnableL7Proxy {
-		for _, prefix := range addedVtepRoutes {
-			ip4 := prefix.IP.To4()
-			if ip4 == nil {
-				return fmt.Errorf("Invalid VTEP CIDR IPv4 address: %v", ip4)
-			}
-			r := route.Route{
-				Device: defaults.HostDevice,
-				Prefix: *prefix.IPNet,
-				Scope:  netlink.SCOPE_LINK,
-				MTU:    vtepMTU,
-				Table:  linux_defaults.RouteTableVtep,
-			}
-			if err := route.Upsert(logger, r); err != nil {
-				return fmt.Errorf("Update VTEP CIDR route error: %w", err)
-			}
-			logger.Info(
-				"VTEP route added",
-				logfields.IPAddr, r.Prefix,
-			)
-
-			rule := route.Rule{
-				Priority: linux_defaults.RulePriorityVtep,
-				To:       prefix.IPNet,
-				Table:    linux_defaults.RouteTableVtep,
-			}
-			if err := route.ReplaceRule(rule); err != nil {
-				return fmt.Errorf("Update VTEP CIDR rule error: %w", err)
-			}
-		}
-	} else {
-		removedVtepRoutes = routeCidrs
-	}
-
-	for _, prefix := range removedVtepRoutes {
-		ip4 := prefix.IP.To4()
-		if ip4 == nil {
-			return fmt.Errorf("Invalid VTEP CIDR IPv4 address: %v", ip4)
-		}
-		r := route.Route{
-			Device: defaults.HostDevice,
-			Prefix: *prefix.IPNet,
-			Scope:  netlink.SCOPE_LINK,
-			MTU:    vtepMTU,
-			Table:  linux_defaults.RouteTableVtep,
-		}
-		if err := route.Delete(r); err != nil {
-			return fmt.Errorf("Delete VTEP CIDR route error: %w", err)
-		}
-		logger.Info(
-			"VTEP route removed",
-			logfields.IPAddr, r.Prefix,
-		)
-
-		rule := route.Rule{
-			Priority: linux_defaults.RulePriorityVtep,
-			To:       prefix.IPNet,
-			Table:    linux_defaults.RouteTableVtep,
-		}
-		if err := route.DeleteRule(netlink.FAMILY_V4, rule); err != nil {
-			return fmt.Errorf("Delete VTEP CIDR rule error: %w", err)
-		}
+		lxcmap.LXCMap(d.params.MetricsRegistry).DeleteAll()
 	}
 
 	return nil

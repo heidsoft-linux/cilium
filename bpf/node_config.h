@@ -45,12 +45,6 @@
 #define LOCAL_NODE_ID 6
 #define REMOTE_NODE_ID 6
 #define KUBE_APISERVER_NODE_ID 7
-/* This identity should never be seen on ingress or egress traffic to/from a
- * node.
- * It signals that the skb is overlay traffic that must be IPSec encrypted
- * before it leaves the host.
- */
-#define ENCRYPTED_OVERLAY_ID 11
 #define CILIUM_HOST_MAC { .addr = { 0xce, 0x72, 0xa7, 0x03, 0x88, 0x56 } }
 #define NODEPORT_PORT_MIN 30000
 #define NODEPORT_PORT_MAX 32767
@@ -91,11 +85,11 @@
 #if defined(ENABLE_CLUSTER_AWARE_ADDRESSING) && defined(ENABLE_INTER_CLUSTER_SNAT)
 #define IPV4_INTER_CLUSTER_SNAT 0xfffff50a
 #endif
-#define SNAT_MAPPING_IPV4_SIZE 524288
-#define NODEPORT_NEIGH4_SIZE 524288
 #endif /* ENABLE_NODEPORT */
-#define CAPTURE4_SIZE 16384
 #endif /* ENABLE_IPV4 */
+
+#define SNAT_MAPPING_IPV4_SIZE 524288
+#define SNAT_MAPPING_IPV6_SIZE 524288
 
 #ifdef ENABLE_IPV6
 # ifdef ENABLE_MASQUERADE_IPV6
@@ -103,15 +97,13 @@
 #  define IPV6_SNAT_EXCLUSION_DST_CIDR_MASK { .addr = { 0xff, 0xff, 0xff, 0xff, 0xff, 0x0 } }
 # endif /* ENABLE_MASQUERADE_IPV6 */
 #ifdef ENABLE_NODEPORT
-#define SNAT_MAPPING_IPV6_SIZE 524288
-#define NODEPORT_NEIGH6_SIZE 524288
 #endif /* ENABLE_NODEPORT */
-#define CAPTURE6_SIZE 16384
 #endif /* ENABLE_IPV6 */
 
-#ifdef ENABLE_NODEPORT
+#define NODEPORT_NEIGH4_SIZE 524288
+#define NODEPORT_NEIGH6_SIZE 524288
+
 #define SNAT_COLLISION_RETRIES 32
-#endif
 
 #ifndef EVENTS_MAP_RATE_LIMIT
 # define EVENTS_MAP_RATE_LIMIT 0
@@ -188,10 +180,8 @@
 # define IS_L3_DEV(ifindex) false
 #endif
 
-#ifdef ENABLE_SRC_RANGE_CHECK
-# define LB4_SRC_RANGE_MAP_SIZE	1000
-# define LB6_SRC_RANGE_MAP_SIZE	1000
-#endif
+#define LB4_SRC_RANGE_MAP_SIZE	1000
+#define LB6_SRC_RANGE_MAP_SIZE	1000
 
 #ifndef LB_SELECTION
 # define LB_SELECTION_RANDOM	1
@@ -201,8 +191,6 @@
 #endif
 
 #ifdef ENABLE_WIREGUARD
-# define WG_IFINDEX	42
-# define WG_PORT    51871
 # ifdef ENCRYPTION_STRICT_MODE
 #  define STRICT_IPV4_NET	0
 #  define STRICT_IPV4_NET_SIZE	8

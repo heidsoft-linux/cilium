@@ -49,25 +49,10 @@ long mock_fib_lookup(__maybe_unused void *ctx, struct bpf_fib_lookup *params,
 	return BPF_FIB_LKUP_RET_SUCCESS;
 }
 
-#include <bpf_host.c>
+#include "lib/bpf_host.h"
 
 #include "lib/ipcache.h"
 #include "lib/lb.h"
-
-#define FROM_NETDEV	0
-#define TO_NETDEV	1
-
-struct {
-	__uint(type, BPF_MAP_TYPE_PROG_ARRAY);
-	__uint(key_size, sizeof(__u32));
-	__uint(max_entries, 2);
-	__array(values, int());
-} entry_call_map __section(".maps") = {
-	.values = {
-		[FROM_NETDEV] = &cil_from_netdev,
-		[TO_NETDEV] = &cil_to_netdev,
-	},
-};
 
 /* Test that a SVC request that is LBed to a DSR remote backend
  * - gets DNATed,
@@ -116,10 +101,7 @@ int nodeport_dsr_fwd_setup(struct __ctx_buff *ctx)
 
 	ipcache_v6_add_entry(&backend_ip, 0, 112233, 0, 0);
 
-	/* Jump into the entrypoint */
-	tail_call_static(ctx, entry_call_map, FROM_NETDEV);
-	/* Fail if we didn't jump */
-	return TEST_ERROR;
+	return netdev_receive_packet(ctx);
 }
 
 CHECK("tc", "tc_nodeport_dsr_fwd")
@@ -133,7 +115,6 @@ int nodeport_dsr_fwd_check(__maybe_unused const struct __ctx_buff *ctx)
 	__u32 *status_code;
 	struct ipv6hdr *l3;
 	struct tcphdr *l4;
-	struct ethhdr *l2;
 
 	test_init();
 
@@ -147,11 +128,7 @@ int nodeport_dsr_fwd_check(__maybe_unused const struct __ctx_buff *ctx)
 
 	assert(*status_code == CTX_ACT_REDIRECT);
 
-	l2 = data + sizeof(__u32);
-	if ((void *)l2 + sizeof(struct ethhdr) > data_end)
-		test_fatal("l2 out of bounds");
-
-	l3 = (void *)l2 + sizeof(struct ethhdr);
+	l3 = data + sizeof(__u32) + sizeof(struct ethhdr);
 	if ((void *)l3 + sizeof(struct ipv6hdr) > data_end)
 		test_fatal("l3 out of bounds");
 
@@ -162,11 +139,6 @@ int nodeport_dsr_fwd_check(__maybe_unused const struct __ctx_buff *ctx)
 	l4 = (void *)opt + sizeof(*opt);
 	if ((void *)l4 + sizeof(struct tcphdr) > data_end)
 		test_fatal("l4 out of bounds");
-
-	if (memcmp(l2->h_source, (__u8 *)lb_mac, ETH_ALEN) != 0)
-		test_fatal("src MAC is not the LB MAC")
-	if (memcmp(l2->h_dest, (__u8 *)remote_backend_mac, ETH_ALEN) != 0)
-		test_fatal("dst MAC is not the backend MAC")
 
 	if (l3->nexthdr != NEXTHDR_DEST)
 		test_fatal("l3 header doesn't indicate DSR extension");

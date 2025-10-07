@@ -247,11 +247,11 @@ func (a *Agent) initLocalNodeFromWireGuard(localNode *node.LocalNode, sel k8sLab
 				types.NodeEncryptionOptOutLabels+" label selector",
 			logfields.Selector, a.config.NodeEncryptionOptOutLabels,
 		)
-		localNode.OptOutNodeEncryption = true
+		localNode.Local.OptOutNodeEncryption = true
 		localNode.EncryptionKey = 0
 	}
 
-	a.optOut = localNode.OptOutNodeEncryption
+	a.optOut = localNode.Local.OptOutNodeEncryption
 }
 
 // init creates and configures the local WireGuard tunnel device.
@@ -817,6 +817,15 @@ func (a *Agent) OnIPIdentityCacheChange(modType ipcache.CacheModification, cidrC
 			)
 		}
 	}
+}
+
+// IfaceIndex returns the index of the Wireguard interface.
+func (a *Agent) IfaceIndex() (uint32, error) {
+	if !a.Enabled() {
+		return 0, nil
+	}
+
+	return link.GetIfIndex(types.IfaceName)
 }
 
 // Status returns the state of the WireGuard tunnel managed by this instance.

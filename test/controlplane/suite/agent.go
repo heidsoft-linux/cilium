@@ -19,6 +19,7 @@ import (
 	fakecni "github.com/cilium/cilium/daemon/cmd/cni/fake"
 	fakeDatapath "github.com/cilium/cilium/pkg/datapath/fake"
 	fakeTypes "github.com/cilium/cilium/pkg/datapath/fake/types"
+	"github.com/cilium/cilium/pkg/datapath/linux/route/reconciler"
 	"github.com/cilium/cilium/pkg/datapath/neighbor"
 	"github.com/cilium/cilium/pkg/datapath/prefilter"
 	datapathTables "github.com/cilium/cilium/pkg/datapath/tables"
@@ -61,10 +62,6 @@ func (h *agentHandle) tearDown() {
 			h.t.Fatalf("Failed to stop the agent: %s", err)
 		}
 	}
-
-	if h.d != nil {
-		h.d.Close()
-	}
 }
 
 func (h *agentHandle) setupCiliumAgentHive(clientset k8sClient.Clientset, extraCell cell.Cell) {
@@ -87,6 +84,7 @@ func (h *agentHandle) setupCiliumAgentHive(clientset k8sClient.Clientset, extraC
 		kvstore.Cell(kvstore.DisabledBackendName),
 		fakeDatapath.Cell,
 		neighbor.ForwardableIPCell,
+		reconciler.TableCell,
 		cell.Provide(neighbor.NewCommonTestConfig(true, false)),
 		prefilter.Cell,
 		monitorAgent.Cell,
@@ -125,7 +123,6 @@ func (h *agentHandle) populateCiliumAgentOptions(testDir string, modConfig func(
 	option.Config.Opts.SetBool(option.TraceNotify, true)
 	option.Config.Opts.SetBool(option.PolicyVerdictNotify, true)
 	option.Config.Opts.SetBool(option.Debug, true)
-	option.Config.EnableIPSec = false
 	option.Config.EnableIPv6 = false
 	option.Config.K8sRequireIPv6PodCIDR = false
 	option.Config.EnableL7Proxy = false
@@ -138,7 +135,6 @@ func (h *agentHandle) populateCiliumAgentOptions(testDir string, modConfig func(
 	// (i.e. the ones defined through cell.Config(...)) must be set to the *viper.Viper
 	// object bound to the test hive.
 	h.hive.Viper().Set(option.EndpointGCInterval, 0)
-
 }
 
 func (h *agentHandle) startCiliumAgent() (*cmd.Daemon, error) {

@@ -39,7 +39,6 @@ enum ct_entry_type {
 	CT_ENTRY_SVC		= (1 << 2),
 };
 
-#ifdef ENABLE_IPV4
 struct ct_buffer4 {
 	struct ipv4_ct_tuple tuple;
 	struct ct_state ct_state;
@@ -47,9 +46,7 @@ struct ct_buffer4 {
 	int ret;
 	int l4_off;
 };
-#endif
 
-#ifdef ENABLE_IPV6
 struct ct_buffer6 {
 	struct ipv6_ct_tuple tuple;
 	struct ct_state ct_state;
@@ -57,7 +54,6 @@ struct ct_buffer6 {
 	int ret;
 	int l4_off;
 };
-#endif
 
 static __always_inline enum ct_action ct_tcp_select_action(union tcp_flags flags)
 {
@@ -1042,7 +1038,8 @@ static __always_inline int ct_create6(const void *map_main, const void *map_rela
 err_ct_fill_up:
 	if (ext_err)
 		*ext_err = (__s8)err;
-	send_signal_ct_fill_up(ctx, SIGNAL_PROTO_V6);
+	if (err == -ENOMEM)
+		send_signal_ct_fill_up(ctx, SIGNAL_PROTO_V6);
 	return DROP_CT_CREATE_FAILED;
 }
 
@@ -1102,13 +1099,27 @@ static __always_inline int ct_create4(const void *map_main,
 err_ct_fill_up:
 	if (ext_err)
 		*ext_err = (__s8)err;
-	send_signal_ct_fill_up(ctx, SIGNAL_PROTO_V4);
+	if (err == -ENOMEM)
+		send_signal_ct_fill_up(ctx, SIGNAL_PROTO_V4);
 	return DROP_CT_CREATE_FAILED;
 }
 
 #ifdef USE_LOOPBACK_LB
 static __always_inline bool
 ct_has_loopback_egress_entry4(const void *map, struct ipv4_ct_tuple *tuple)
+{
+	__u8 flags = tuple->flags;
+	struct ct_entry *entry;
+
+	tuple->flags = TUPLE_F_OUT;
+	entry = map_lookup_elem(map, tuple);
+	tuple->flags = flags;
+
+	return entry && entry->lb_loopback;
+}
+
+static __always_inline bool
+ct_has_loopback_egress_entry6(const void *map, struct ipv6_ct_tuple *tuple)
 {
 	__u8 flags = tuple->flags;
 	struct ct_entry *entry;

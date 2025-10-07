@@ -41,6 +41,7 @@ import (
 	fqdn "github.com/cilium/cilium/pkg/fqdn/cell"
 	"github.com/cilium/cilium/pkg/gops"
 	"github.com/cilium/cilium/pkg/health"
+	"github.com/cilium/cilium/pkg/healthconfig"
 	hubble "github.com/cilium/cilium/pkg/hubble/cell"
 	identity "github.com/cilium/cilium/pkg/identity/cell"
 	ipamcell "github.com/cilium/cilium/pkg/ipam/cell"
@@ -51,7 +52,7 @@ import (
 	k8sSynced "github.com/cilium/cilium/pkg/k8s/synced"
 	"github.com/cilium/cilium/pkg/k8s/watchers"
 	"github.com/cilium/cilium/pkg/k8s/watchers/resources"
-	"github.com/cilium/cilium/pkg/kpr"
+	kpr "github.com/cilium/cilium/pkg/kpr/initializer"
 	"github.com/cilium/cilium/pkg/kvstore"
 	"github.com/cilium/cilium/pkg/kvstore/store"
 	"github.com/cilium/cilium/pkg/l2announcer"
@@ -74,11 +75,11 @@ import (
 	policyK8s "github.com/cilium/cilium/pkg/policy/k8s"
 	"github.com/cilium/cilium/pkg/pprof"
 	"github.com/cilium/cilium/pkg/proxy"
-	"github.com/cilium/cilium/pkg/recorder"
 	shell "github.com/cilium/cilium/pkg/shell/server"
 	"github.com/cilium/cilium/pkg/signal"
 	"github.com/cilium/cilium/pkg/source"
 	"github.com/cilium/cilium/pkg/status"
+	"github.com/cilium/cilium/pkg/svcrouteconfig"
 )
 
 var (
@@ -266,7 +267,7 @@ var (
 		// Provides the BPF ip-masq-agent implementation, which is responsible for managing IP masquerading rules
 		ipmasq.Cell,
 
-		// Provides KPRConfig
+		// Provides KPR config & initialization logic
 		kpr.Cell,
 
 		// Provides PolicyRepository (List of policy rules)
@@ -305,9 +306,6 @@ var (
 		// K8s Watcher provides the core k8s watchers
 		watchers.Cell,
 
-		// Provide pcap recorder
-		recorder.Cell,
-
 		// Provides a wrapper of the cilium config that can be watched dynamically
 		dynamicconfig.Cell,
 
@@ -336,11 +334,16 @@ var (
 		// Cilium health infrastructure (host and endpoint connectivity)
 		health.Cell,
 
+		// Cilium health config
+		healthconfig.Cell,
+
 		// Cilium Status Collector
 		status.Cell,
 
 		// Cilium Debuginfo API
 		debugapi.Cell,
+
+		svcrouteconfig.Cell,
 	)
 )
 
@@ -380,9 +383,11 @@ func configureAPIServer(cfg *option.DaemonConfig, s *server.Server, db *statedb.
 }
 
 var pprofConfig = pprof.Config{
-	Pprof:        false,
-	PprofAddress: option.PprofAddressAgent,
-	PprofPort:    option.PprofPortAgent,
+	Pprof:                     false,
+	PprofAddress:              option.PprofAddressAgent,
+	PprofPort:                 option.PprofPortAgent,
+	PprofMutexProfileFraction: 0,
+	PprofBlockProfileRate:     0,
 }
 
 // resourceGroups are all of the core Kubernetes and Cilium resource groups
@@ -420,7 +425,8 @@ func kvstoreExtraOptions(in struct {
 	NodeManager nodeManager.NodeManager
 	ClientSet   k8sClient.Clientset
 	Resolver    *dial.ServiceResolver
-}) (kvstore.ExtraOptions, kvstore.BootstrapStat) {
+},
+) (kvstore.ExtraOptions, kvstore.BootstrapStat) {
 	goopts := kvstore.ExtraOptions{
 		ClusterSizeDependantInterval: in.NodeManager.ClusterSizeDependantInterval,
 	}

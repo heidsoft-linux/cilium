@@ -27,7 +27,7 @@ cilium connectivity test [flags]
       --curl-insecure                                         Pass --insecure to curl
       --curl-parallel uint                                    Number of parallel requests in curl commands (0 to disable)
   -d, --debug                                                 Show debug messages
-      --dns-test-server-image string                          Image path to use for CoreDNS (default "registry.k8s.io/coredns/coredns:v1.12.2@sha256:af8c8d35a5d184b386c4a6d1a012c8b218d40d1376474c7d071bb6c07201f47d")
+      --dns-test-server-image string                          Image path to use for CoreDNS (default "registry.k8s.io/coredns/coredns:v1.12.4@sha256:986f04c2e15e147d00bdd51e8c51bcef3644b13ff806be7d2ff1b261d6dfbae1")
       --echo-image string                                     Image path to use for echo server (default "gcr.io/k8s-staging-gateway-api/echo-advanced:v20240412-v1.0.0-394-g40c666fd")
       --external-cidr string                                  IPv4 CIDR to use as external target in connectivity tests (default "1.0.0.0/8")
       --external-cidrv6 string                                IPv6 CIDR to use as external target in connectivity tests (default "2606:4700:4700::/96")
@@ -51,7 +51,7 @@ cilium connectivity test [flags]
       --include-conn-disrupt-test-egw                         Include conn disrupt test for Egress Gateway
       --include-conn-disrupt-test-ns-traffic                  Include conn disrupt test for NS traffic
       --ip-families strings                                   Restrict test actions to specific IP families (default [ipv4,ipv6])
-      --json-mock-image string                                Image path to use for json mock (default "quay.io/cilium/json-mock:v1.3.8@sha256:5aad04835eda9025fe4561ad31be77fd55309af8158ca8663a72f6abb78c2603")
+      --json-mock-image string                                Image path to use for json mock (default "quay.io/cilium/json-mock:v1.3.9@sha256:c98b26177a5a60020e5aa404896d55f0ab573d506f42acfb4aa4f5705a5c6f56")
       --junit-file string                                     Generate junit report and write to file
       --junit-property map                                    Add key=value properties to the generated junit file
       --k8s-version string                                    Kubernetes server version in case auto-detection fails
@@ -69,7 +69,7 @@ cilium connectivity test [flags]
       --secondary-network-iface string                        Secondary network iface name (e.g., to test NodePort BPF on multiple networks)
       --service-type string                                   Type of Kubernetes Services created for connectivity tests (default "NodePort")
       --single-node                                           Limit to tests able to run on a single node
-      --socat-image string                                    Image path to use for multicast tests (default "docker.io/alpine/socat:1.8.0.3@sha256:10648ef7279a34318c856502639c7a35cd23690d91a22077e6801217825d0817")
+      --socat-image string                                    Image path to use for multicast tests (default "docker.io/alpine/socat:1.8.0.3@sha256:67f2f93884c21216776aeeb1bc5326d8302f80e585e13ee1e0a6d8bb08e45436")
       --sysdump-cilium-bugtool-flags stringArray              Optional set of flags to pass to cilium-bugtool command.
       --sysdump-cilium-daemon-set-label-selector string       The labels used to target Cilium daemon set (default "k8s-app=cilium")
       --sysdump-cilium-envoy-label-selector string            The labels used to target Cilium Envoy pods (default "k8s-app=cilium-envoy")

@@ -40,19 +40,7 @@ func init() {
 	k8s_metrics.RequestLatency = registerOps.RequestLatency
 	k8s_metrics.RateLimiterLatency = registerOps.RateLimiterLatency
 	k8s_metrics.RequestResult = registerOps.RequestResult
-
-	// Note: Workqueues should have the metric provider set directly
-	// via the [TypedRateLimitingQueueConfig.MetricsProvider] field.
-	// The workqueue.SetProvider call is inherently prone to breaking
-	// (see: above commment), however we will still attempt to register
-	// it for the sake of posterity.
-	workqueue.SetProvider(MetricsProvider)
 }
-
-// MetricsProvider is the global metrics provider for k8s controller runtime
-// watcher work queues. This should be set directly in TypedRateLimitingQueueConfig
-// when configuring work queues.
-var MetricsProvider = workqueueMetricsProvider{}
 
 type workqueueMetricsProvider struct{}
 
@@ -95,7 +83,7 @@ func (*requestLatencyAdapter) Observe(_ context.Context, verb string, u url.URL,
 type rateLimiterLatencyAdapter struct{}
 
 func (c *rateLimiterLatencyAdapter) Observe(_ context.Context, verb string, u url.URL, latency time.Duration) {
-	metrics.KubernetesAPIRateLimiterLatency.WithLabelValues(u.Path, verb).Observe(latency.Seconds())
+	metrics.KubernetesAPIRateLimiterLatency.WithLabelValues().Observe(latency.Seconds())
 }
 
 // resultAdapter implements the ResultMetric interface from k8s client-go package

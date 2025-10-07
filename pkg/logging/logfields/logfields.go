@@ -526,6 +526,12 @@ const (
 	// EndpointSelector is a selector for Endpoints
 	EndpointSelector = "EndpointSelector"
 
+	// PodSelector is a selector for Pods
+	PodSelector = "PodSelector"
+
+	// NamespaceSelector is a selector for Namespaces
+	NamespaceSelector = "NamespaceSelector"
+
 	// Path is a filesystem path. It can be a file or directory.
 	// Note: pkg/proxy/accesslog points to this variable so be careful when
 	// changing the value
@@ -1098,6 +1104,10 @@ const (
 
 	PoolSpec = "poolSpec"
 
+	PoolOldSpec = "poolOldSpec"
+
+	PoolNewSpec = "poolNewSpec"
+
 	PoolName = "poolName"
 
 	MaxRetries = "maxRetries"
@@ -1151,6 +1161,10 @@ const (
 	Registrations = "registrations"
 
 	HTTPRoute = "httpRoute"
+
+	TLSRoute = "tlsRoute"
+
+	GRPCRoute = "grpcRoute"
 
 	Secret = "secret"
 
@@ -1678,8 +1692,6 @@ const (
 
 	Section = "section"
 
-	Instruction = "instruction"
-
 	Reference = "reference"
 
 	MapRenames = "mapRenames"
@@ -1795,4 +1807,19 @@ const (
 	Matcher = "matcher"
 
 	ParentResource = "parentResource"
+
+	Fraction = "fraction"
+
+	Rate = "rate"
+
+	KPRConfiguration = "kprConfiguration"
+
+	// CESFeatureEnabled indicates whether CiliumEndpointSlice feature is enabled.
+	CESFeatureEnabled = "cesEnabled"
+
+	// Matches is a list of pools that match a pod.
+	Matches = "matches"
+
+	// CompiledPools is a map of pools that use podSelectors
+	CompiledPools = "compiledPools"
 )

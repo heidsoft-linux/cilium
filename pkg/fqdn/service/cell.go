@@ -39,7 +39,7 @@ type serverParams struct {
 	cell.In
 
 	Logger             *slog.Logger
-	EndpointManager    endpointmanager.EndpointManager
+	EndpointsLookup    endpointmanager.EndpointsLookup
 	DNSRequestHandler  messagehandler.DNSMessageHandler
 	IPCache            *ipcache.IPCache
 	JobGroup           job.Group
@@ -47,7 +47,7 @@ type serverParams struct {
 	DaemonConfig       *option.DaemonConfig
 	DefaultListener    listenConfig
 	DB                 *statedb.DB
-	PolicyRulesTable   statedb.RWTable[policyRules]
+	PolicyRulesTable   statedb.RWTable[PolicyRules]
 	IdentityToIPsTable statedb.RWTable[identityToIPs]
 }
 

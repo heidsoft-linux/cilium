@@ -6,6 +6,7 @@ package shell
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -20,11 +21,14 @@ import (
 
 	"github.com/cilium/cilium/pkg/defaults"
 	"github.com/cilium/cilium/pkg/logging/logfields"
+	baseshell "github.com/cilium/cilium/pkg/shell"
 )
 
 var Cell = cell.Module(
 	"shell",
 	"Cilium debug shell",
+
+	cell.Config(baseshell.DefaultConfig),
 	cell.Invoke(registerShell),
 )
 
@@ -35,7 +39,7 @@ var defaultCmdsToInclude = []string{
 	"cat", "exec", "help",
 }
 
-func registerShell(in hive.ScriptCmds, log *slog.Logger, jg job.Group) {
+func registerShell(in hive.ScriptCmds, log *slog.Logger, jg job.Group, c baseshell.Config) {
 	cmds := in.Map()
 	defCmds := script.DefaultCmds()
 	for _, name := range defaultCmdsToInclude {
@@ -45,18 +49,19 @@ func registerShell(in hive.ScriptCmds, log *slog.Logger, jg job.Group) {
 		Cmds:  cmds,
 		Conds: nil,
 	}
-	jg.Add(job.OneShot("listener", shell{jg, log, &e}.listener))
+	jg.Add(job.OneShot("listener", shell{jg, log, &e, c}.listener))
 }
 
 type shell struct {
 	jg     job.Group
 	log    *slog.Logger
 	engine *script.Engine
+	config baseshell.Config
 }
 
 func (sh shell) listener(ctx context.Context, health cell.Health) error {
 	// Remove any old UNIX sock file from previous runs.
-	os.Remove(defaults.ShellSockPath)
+	os.Remove(sh.config.ShellSockPath)
 
 	if _, err := os.Stat(defaults.RuntimePath); os.IsNotExist(err) {
 		if err := os.MkdirAll(defaults.RuntimePath, defaults.RuntimePathRights); err != nil {
@@ -65,9 +70,9 @@ func (sh shell) listener(ctx context.Context, health cell.Health) error {
 	}
 
 	var lc net.ListenConfig
-	l, err := lc.Listen(ctx, "unix", defaults.ShellSockPath)
+	l, err := lc.Listen(ctx, "unix", sh.config.ShellSockPath)
 	if err != nil {
-		return fmt.Errorf("failed to listen on %q: %w", defaults.ShellSockPath, err)
+		return fmt.Errorf("failed to listen on %q: %w", sh.config.ShellSockPath, err)
 	}
 
 	var wg sync.WaitGroup
@@ -79,11 +84,15 @@ func (sh shell) listener(ctx context.Context, health cell.Health) error {
 	}()
 	defer wg.Wait()
 
-	health.OK(fmt.Sprintf("Listening on %s", defaults.ShellSockPath))
+	health.OK(fmt.Sprintf("Listening on %s", sh.config.ShellSockPath))
 	connCount := 0
 	for ctx.Err() == nil {
 		conn, err := l.Accept()
 		if err != nil {
+			// If context is cancelled, the listener was closed gracefully
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return nil
+			}
 			return fmt.Errorf("accept failed: %w", err)
 		}
 		sh.jg.Add(job.OneShot(

@@ -304,19 +304,47 @@ communicating via the proxy must reconnect to re-establish connections.
   across different clusters. See :ref:`change_policy_default_local_cluster` for more details and migration recommendations
   to update your network policies.
 * Kafka Network Policy support is deprecated and will be removed in Cilium v1.20.
+* Hubble field mask support was stabilized. In the Observer gRPC API, ``GetFlowsRequest.Experimental.field_mask`` was removed in favor of ``GetFlowsRequest.field_mask``. In the Hubble CLI, the ``--experimental-field-mask`` has been renamed to ``--field-mask`` and ``--experimental-use-default-field-mask`` renamed to ``-use-default-field-mask`` (now ``true`` by default).
+* Cilium-agent ClusterMesh status will no longer report the global services count. When using the CLI
+  with a version lower than 1.19, the global services count will be reported as 0.
+* ``enable-remote-node-masquerade`` config option is introduced.
+  To masquerade traffic to remote nodes in BPF masquerading mode,
+  use the option ``enable-remote-node-masquerade: "true"``.
+  This option requires ``enable-bpf-masquerade: "true"`` and also either
+  ``enable-ipv4-masquerade: "true"`` or ``enable-ipv6-masquerade: "true"``
+  to SNAT traffic for IPv4 and IPv6, respectively.
+  This flag currently masquerades traffic to node ``InternalIP`` addresses.
+  This may change in future. See :gh-issue:`35823`
+  and :gh-issue:`17177` for further discussion on this topic.
+* MCS-API CRDs need to be updated, see the MCS-API :ref:`clustermesh_mcsapi_prereqs` for updated CRD links.
+* Cilium will stop reporting its local cluster name and node name in metrics. Users relying on those
+  should configure their metrics collection system to add similar labels instead.
 
 Removed Options
 ~~~~~~~~~~~~~~~
 * The previously deprecated ``--bpf-lb-proto-diff`` flag has been removed.
+* The previously deprecated PCAP recorder feature and its accompanying flags (``--enable-recorder``,
+  ``--hubble-recorder-*``) have been removed.
+* The previously deprecated ``--enable-session-affinity``, ``--enable-internal-traffic-policy``, and
+  ``--enable-svc-source-range-check`` flags have been removed. Their corresponding features are
+  enabled by default.
+* The previously deprecated ``--enable-node-port``, ``--enable-host-port``, and ``--enable-external-ips``
+  flags have been removed. To enable the corresponding features, users must set ``--kube-proxy-replacement=true``.
 
 Deprecated Options
 ~~~~~~~~~~~~~~~~~~
-
+* The ``--enable-ipsec-encrypted-overlay`` flag has no effect and will be removed in Cilium 1.20. Starting from
+  Cilium 1.18 the IPsec encryption is always applied after overlay encapsulation, and therefore this special opt-in
+  flag is no longer needed.
 
 Helm Options
 ~~~~~~~~~~~~
 * The Helm option ``clustermesh.enableMCSAPISupport`` has been deprecated in favor of ``clustermesh.mcsapi.enabled``
   and will be removed in Cilium 1.20.
+* The Helm option ``clustermesh.config.clusters`` now support a new format based on a dict
+  in addition to the previous list format. The new format is recommended for users installing
+  Cilium ClusterMesh without Cilium CLI and could allow you to organize your clusters definition
+  in multiple Helm value files. See the Cilium Helm chart documentation or value file for more details.
 
 
 Agent Options
@@ -333,13 +361,54 @@ Bugtool Options
 
 Added Metrics
 ~~~~~~~~~~~~~
+* ``cilium_agent_clustermesh_remote_cluster_endpoints`` was added and report
+  the total number of endpoints per remote cluster in a ClusterMesh environment.
 
 Removed Metrics
 ~~~~~~~~~~~~~~~
 
+* ``k8s_internal_traffic_policy_enabled`` has been removed, because the corresponding feature is enabled by default.
 
 Changed Metrics
 ~~~~~~~~~~~~~~~
+
+The following metrics previously had instances (i.e. for some watcher K8s resource type labels) under ``workqueue_``.
+In this release any such metrics have been renamed and combined into the correct metric name prefixed with ``cilium_operator_``.
+
+As well, any remaining Operator k8s workqueue metrics that use the label ``queue_name`` have had it renamed to 
+``name`` to be consistent with agent k8s workqueue metrics.
+
+* The metric ``workqueue_adds_total`` has been renamed and combined into to ``cilium_operator_k8s_workqueue_adds_total``, the label ``queue_name`` has been renamed to ``name``.
+* The metric ``workqueue_depth`` has been renamed and combined into ``cilium_operator_k8s_workqueue_adds_total``, the label ``queue_name`` has been renamed to ``name``.
+* The metric ``workqueue_longest_running_processor_seconds`` has been renamed and combined into ``cilium_operator_k8s_workqueue_longest_running_processor_seconds``, the label ``queue_name`` has been renamed to ``name``.
+* The metric ``workqueue_queue_duration_seconds`` has been renamed and combined into ``cilium_operator_k8s_workqueue_queue_duration_seconds``, the label ``queue_name`` has been renamed to ``name``.
+* The metric ``workqueue_retries_total`` has been renamed and combined into ``cilium_operator_k8s_workqueue_retries_total`, the label ``queue_name`` has been renamed to ``name``.
+* The metric ``workqueue_unfinished_work_seconds`` has been renamed and combined into ``cilium_operator_k8s_workqueue_unfinished_work_seconds`, the label ``queue_name`` has been renamed to ``name``.
+* The metric ``workqueue_work_duration_seconds`` has been renamed and combined into ``cilium_operator_k8s_workqueue_work_duration_seconds``, the label ``queue_name`` has been renamed to ``name``.
+
+* ``k8s_client_rate_limiter_duration_seconds`` no longer has labels ``path`` and ``method``.
+
+The following metrics:
+* ``cilium_agent_clustermesh_global_services``
+* ``cilium_operator_clustermesh_global_services``
+* ``cilium_operator_clustermesh_global_service_exports``
+now report per cluster metric instead of a "global" count and were renamed to respectively:
+* ``cilium_agent_clustermesh_remote_cluster_services``
+* ``cilium_operator_clustermesh_remote_cluster_services``
+* ``cilium_operator_clustermesh_remote_cluster_service_exports``
+
+The following metrics no longer reports a ``source_cluster`` and a ``source_node_name`` label:
+* ``node_health_connectivity_status``
+* ``node_health_connectivity_latency_seconds``
+* ``bootstrap_seconds``
+* ``*_remote_clusters``
+* ``*_remote_cluster_last_failure_ts``
+* ``*_remote_cluster_readiness_status``
+* ``*_remote_cluster_failures``
+* ``*_remote_cluster_nodes``
+* ``*_remote_cluster_services``
+* ``*_remote_cluster_endpoints``
+* ``cilium_operator_clustermesh_remote_cluster_service_exports``
 
 
 Deprecated Metrics
@@ -567,7 +636,7 @@ Below is an example where there is one network policy that needs to be updated:
 
 .. code-block:: shell-session
 
-    $ cilium clustermesh prepare-policy-default-local-cluster --all-namespaces
+    $ cilium clustermesh inspect-policy-default-local-cluster --all-namespaces
 
     ⚠️ CiliumNetworkPolicy 0/1
             ⚠️ default/allow-from-bar

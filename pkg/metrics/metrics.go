@@ -71,6 +71,9 @@ const (
 	// SubsystemAPILimiter is the subsystem to scope metrics related to the API limiter package.
 	SubsystemAPILimiter = "api_limiter"
 
+	// SubsystemClusterMesh is the subsystem to scope metrics related to the clustermesh area.
+	SubsystemClusterMesh = "clustermesh"
+
 	// CiliumAgentNamespace is used to scope metrics from the Cilium Agent
 	CiliumAgentNamespace = "cilium"
 
@@ -215,10 +218,8 @@ const (
 	LabelDirection = "direction"
 
 	// LabelSourceCluster is the label for source cluster name
+	// This should not be used to self identify the local cluster
 	LabelSourceCluster = "source_cluster"
-
-	// LabelSourceNodeName is the label for source node name
-	LabelSourceNodeName = "source_node_name"
 
 	// LabelTargetCluster is the label for target cluster name
 	LabelTargetCluster = "target_cluster"
@@ -252,8 +253,9 @@ var (
 	// LabelValuesBool is metric label value set for boolean type.
 	LabelValuesBool = metric.NewValues(LabelValueTrue, LabelValueFalse)
 
-	// Namespace is used to scope metrics from cilium. It is prepended to metric
-	// names and separated with a '_'
+	// Namespace is used to scope metrics from the current cilium component by
+	// overwriting its value at runtime before hive initialization. It is prepended
+	// to metric names and separated with a '_'
 	Namespace = CiliumAgentNamespace
 
 	registryResolver, registry = promise.New[*Registry]()
@@ -1009,9 +1011,9 @@ func NewLegacyMetrics() *LegacyMetrics {
 			Namespace:  Namespace,
 			Subsystem:  SubsystemK8sClient,
 			Name:       "rate_limiter_duration_seconds",
-			Help:       "Kubernetes client rate limiter latency in seconds. Broken down by path and method.",
+			Help:       "Kubernetes client rate limiter latency in seconds.",
 			Buckets:    []float64{0.005, 0.025, 0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 60.0},
-		}, []string{LabelPath, LabelMethod}),
+		}, []string{}),
 
 		KubernetesAPICallsTotal: metric.NewCounterVec(metric.CounterOpts{
 			ConfigName: Namespace + "_" + SubsystemK8sClient + "_api_calls_total",
@@ -1240,8 +1242,6 @@ func NewLegacyMetrics() *LegacyMetrics {
 			Name:       "node_health_connectivity_status",
 			Help:       "The number of endpoints with last observed status of both ICMP and HTTP connectivity between the current Cilium agent and other Cilium nodes",
 		}, []string{
-			LabelSourceCluster,
-			LabelSourceNodeName,
 			LabelType,
 			LabelConnectivityStatus,
 		}),
@@ -1253,8 +1253,6 @@ func NewLegacyMetrics() *LegacyMetrics {
 			Help:       "The histogram for last observed latency between the current Cilium agent and other Cilium nodes in seconds",
 			Buckets:    []float64{0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0},
 		}, []string{
-			LabelSourceCluster,
-			LabelSourceNodeName,
 			LabelType,
 			LabelProtocol,
 			LabelAddressType,
